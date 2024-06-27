@@ -94,33 +94,16 @@ with bags.DatasetReader(directory, decoders) as reader:
 
 # Serialization
 
-Bags does not impose a serialization solution on the user. Here are examples of
-commonly used type strings and corresponding encode and decode functions.
+Bags does not impose a serialization solution on the user. Any words can be
+used as types, as long as an encoder and decoder is available.
 
-```python
-encoders = {
-    'bytes': lambda x: x,
-    'utf8': lambda x: x.encode('utf-8'),
-    'int': lambda x, size=None: x.to_bytes(
-        int(size if size else np.ceil(np.log2(1 + x) / 8))),
-    'msgpack': msgpack.packb,
-    'array': lambda x, *args: x.tobytes(),
-}
-
-decoders = {
-    'bytes': lambda x: x,
-    'utf8': lambda x: x.decode('utf-8'),
-    'int': lambda x, size=None: int.from_bytes(x),
-    'msgpack': msgpack.unpackb,
-    'array': lambda x, dtype, *shape: np.frombuffer(x, dtype).reshape(
-        tuple(int(x) for x in shape))
-}
-```
-
-Any words can be used as types, as long as an encoder and decoder is available.
+Examples of commonly used type strings and corresponding encode and decode
+functions are provided in [formats.py][formats].
 
 Types can be paremeterized with args that will be passed into the encoder and
 decoder, such as `array(float32,64,128)`.
+
+[file]: https://github.com/danijar/bags/blob/main/bags/formats.py
 
 ## Questions
 

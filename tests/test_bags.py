@@ -2,32 +2,12 @@ import json
 import pathlib
 import sys
 
-import msgpack
 import numpy as np
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 import bags
-
-
-ENCODERS = {
-    'bytes': lambda x: x,
-    'utf8': lambda x: x.encode('utf-8'),
-    'int': lambda x, size=None: x.to_bytes(
-        int(size if size else np.ceil(np.log2(1 + x) / 8))),
-    'msgpack': msgpack.packb,
-    'array': lambda x, *args: x.tobytes(),
-}
-
-DECODERS = {
-    'bytes': lambda x: x,
-    'utf8': lambda x: x.decode('utf-8'),
-    'int': lambda x, size=None: int.from_bytes(x),
-    'msgpack': msgpack.unpackb,
-    'array': lambda x, dtype, *shape: np.frombuffer(x, dtype).reshape(
-        tuple(int(x) for x in shape))
-}
 
 
 class TestBags:
@@ -156,7 +136,7 @@ class TestBags:
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'foo': 'utf8', 'bar': 'int(4)', 'baz': 'utf8[]'}
     with bags.DatasetWriter(
-        directory, spec, ENCODERS, shardsize=100) as writer:
+        directory, spec, bags.encoders, shardsize=100) as writer:
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         index = writer.append({'foo': 'hello world', 'bar': i, 'baz': baz})
@@ -180,14 +160,14 @@ class TestBags:
     spec = {'bar': 'int(4)', 'baz': 'utf8[]', 'foo': 'utf8'}
     datapoints = []
     with bags.DatasetWriter(
-        directory, spec, ENCODERS, shardsize=100) as writer:
+        directory, spec, bags.encoders, shardsize=100) as writer:
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
         writer.append(datapoint)
         datapoints.append(datapoint)
       size = writer.size
-    with bags.DatasetReader(directory, DECODERS, cache_index) as reader:
+    with bags.DatasetReader(directory, bags.decoders, cache_index) as reader:
       assert len(reader) == 10
       assert reader.size == size
       for i in range(10):
@@ -200,13 +180,13 @@ class TestBags:
     spec = {'foo': 'utf8', 'bar': 'int(4)', 'baz': 'utf8[]'}
     datapoints = []
     with bags.DatasetWriter(
-        directory, spec, ENCODERS, shardsize=100) as writer:
+        directory, spec, bags.encoders, shardsize=100) as writer:
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
         writer.append(datapoint)
         datapoints.append(datapoint)
-    with bags.DatasetReader(directory, DECODERS, cache_index) as reader:
+    with bags.DatasetReader(directory, bags.decoders, cache_index) as reader:
       assert reader[3, {}] == {}
       assert reader[3, {'foo': True}] == {'foo': 'hello world'}
       with pytest.raises(TypeError):
@@ -229,6 +209,7 @@ class TestBags:
         'e': 'int[]',
         'f': 'bytes',
         'g': 'array(float32,10,4)',
+        'h': 'jpeg',
     }
     datapoints = []
     for i in range(10):
@@ -240,12 +221,13 @@ class TestBags:
           'e': list(range(i)),
           'f': b'hello world',
           'g': np.ones((10, 4), np.float32),
+          'h': np.zeros((320, 180, 3), np.uint8),
       })
     with bags.DatasetWriter(
-        directory, spec, ENCODERS, shardsize=1000) as writer:
+        directory, spec, bags.encoders, shardsize=1000) as writer:
       for datapoint in datapoints:
         writer.append(datapoint)
-    with bags.DatasetReader(directory, DECODERS) as reader:
+    with bags.DatasetReader(directory, bags.decoders) as reader:
       for i in range(len(reader)):
         actual = reader[i]
         reference = datapoints[i]
