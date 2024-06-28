@@ -76,9 +76,9 @@ decoders = {
 with bags.DatasetReader(directory, decoders) as reader:
   print(len(reader))
 
-  # Read data points by index. This will read only the relevant bytes from #
-  disk. An additional small read is used when caching index tables is #
-  disabled, supporting arbitrarily large datasets with minimal overhead.
+  # Read data points by index. This will read only the relevant bytes from
+  # disk. An additional small read is used when caching index tables is
+  # disabled, supporting arbitrarily large datasets with minimal overhead.
   assert reader[0] == {'foo': 42, 'bar': ['hello', 'world'], 'baz': {'a': 1}
 
   # Read a subset of keys of a datapoint. For example, this allows quickly
@@ -88,22 +88,22 @@ with bags.DatasetReader(directory, decoders) as reader:
 
   # Read only a slice of the 'bar' list. Only the requested slice will be
   # fetched from disk. For example, the could be used to load a subsequence of
-  a long video that is stored as list of consecutive MP4 clips.
+  # a long video that is stored as list of consecutive MP4 clips.
   assert reader[0, {'bar': range(1, 2)}] == {'bar': ['world']}
 ```
 
-# Serialization
+# Formats
 
 Bags does not impose a serialization solution on the user. Any words can be
 used as types, as long as an encoder and decoder is available.
 
-Examples of commonly used type strings and corresponding encode and decode
-functions are provided in [formats.py][formats].
+Examples of encode and decode functions for commonly used types like text,
+Numpy arrays, images, and video are provided in [formats.py][formats].
 
 Types can be paremeterized with args that will be passed into the encoder and
 decoder, such as `array(float32,64,128)`.
 
-[file]: https://github.com/danijar/bags/blob/main/bags/formats.py
+[formats]: https://github.com/danijar/bags/blob/main/bags/formats.py
 
 ## Questions
 

@@ -209,7 +209,8 @@ class TestBags:
         'e': 'int[]',
         'f': 'bytes',
         'g': 'array(float32,10,4)',
-        'h': 'jpeg',
+        'h': 'jpeg(80)',
+        'i': 'png',
     }
     datapoints = []
     for i in range(10):
@@ -222,6 +223,7 @@ class TestBags:
           'f': b'hello world',
           'g': np.ones((10, 4), np.float32),
           'h': np.zeros((320, 180, 3), np.uint8),
+          'i': np.zeros((80, 60, 4), np.uint8),
       })
     with bags.DatasetWriter(
         directory, spec, bags.encoders, shardsize=1000) as writer:
