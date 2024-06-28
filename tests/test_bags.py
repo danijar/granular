@@ -77,7 +77,7 @@ class TestBags:
     filename = directory / 'file.bag'
     with bags.ShardedWriter(filename, shardsize) as writer:
       for i in range(numitems):
-        writer.append(i.to_bytes(itemsize, 'l;ittle'))
+        writer.append(i.to_bytes(itemsize, 'little'))
     shardlen = (shardsize - 8) // (itemsize + 8)
     numshards = int(np.ceil(numitems / shardlen))
     with bags.ShardedReader(filename, cache_index) as reader:
@@ -211,6 +211,7 @@ class TestBags:
         'g': 'array(float32,10,4)',
         'h': 'jpeg(80)',
         'i': 'png',
+        'j': 'mp4(15)',
     }
     datapoints = []
     for i in range(10):
@@ -224,6 +225,7 @@ class TestBags:
           'g': np.ones((10, 4), np.float32),
           'h': np.zeros((320, 180, 3), np.uint8),
           'i': np.zeros((80, 60, 4), np.uint8),
+          'j': np.zeros((20, 80, 60, 3), np.uint8),
       })
     with bags.DatasetWriter(
         directory, spec, bags.encoders, shardsize=1000) as writer:

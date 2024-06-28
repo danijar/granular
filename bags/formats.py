@@ -41,6 +41,37 @@ def image_decode(buffer, *args):
   return np.asarray(Image.open(io.BytesIO(buffer)))
 
 
+def mp4_encode(array, fps=15):
+  import av
+  T, H, W = array.shape[:3]
+  fp = io.BytesIO()
+  output = av.open(fp, mode='w', format='mp4')
+  stream = output.add_stream('mpeg4', rate=float(fps))
+  stream.width = W
+  stream.height = H
+  stream.pix_fmt = 'yuv420p'
+  for t in range(T):
+    frame = av.VideoFrame.from_ndarray(array[t], format='rgb24')
+    frame.pts = t
+    output.mux(stream.encode(frame))
+  output.mux(stream.encode(None))
+  output.close()
+  return fp.getvalue()
+
+
+def mp4_decode(buffer, *args):
+  import numpy as np
+  import av
+  container = av.open(io.BytesIO(buffer))
+  stream = container.streams.video[0]
+  T, H, W = stream.frames, stream.height, stream.width
+  array = np.empty((T, H, W, 3), dtype=np.uint8)
+  for t, frame in enumerate(container.decode(video=0)):
+    array[t] = frame.to_ndarray(format='rgb24')
+  container.close()
+  return array
+
+
 encoders = {
     'bytes': lambda x: x,
     'utf8': lambda x: x.encode('utf-8'),
@@ -49,6 +80,7 @@ encoders = {
     'array': array_encode,
     'jpeg': functools.partial(image_encode, format='jpeg'),
     'png': functools.partial(image_encode, format='png'),
+    'mp4': mp4_encode,
 }
 
 decoders = {
@@ -59,4 +91,5 @@ decoders = {
     'array': array_decode,
     'jpeg': image_decode,
     'png': image_decode,
+    'mp4': mp4_decode,
 }

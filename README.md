@@ -96,13 +96,18 @@ with bags.DatasetReader(directory, decoders) as reader:
 # Formats
 
 Bags does not impose a serialization solution on the user. Any words can be
-used as types, as long as an encoder and decoder is available.
+used as types, as long as an encoder and decoder is provided.
 
-Examples of encode and decode functions for commonly used types like text,
-Numpy arrays, images, and video are provided in [formats.py][formats].
+Examples of encode and decode functions for common types are provided in
+[formats.py][formats] and include:
 
-Types can be paremeterized with args that will be passed into the encoder and
-decoder, such as `array(float32,64,128)`.
+- Numpy
+- JPEG
+- PNG
+- MP4
+
+Types can be paremeterized with args that will be forwarded to the encoder and
+decoder, for example `array(float32,64,128)`.
 
 [formats]: https://github.com/danijar/bags/blob/main/bags/formats.py
 
