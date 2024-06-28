@@ -1,19 +1,20 @@
 [![PyPI](https://img.shields.io/pypi/v/bags.svg)](https://pypi.python.org/pypi/bags/#history)
 
-# 👜 Bags: Fast format for storing datasets
+# 👜 Bags: Fast format for datasets
 
 Bags is a library for reading and writing multimodal datasets. Each dataset is
-a collection of linked files of the [bag][bag] type, a simple container format.
+a collection of linked files of the [bag file format][bag] type, a simple
+seekable container structure.
 
 [bag]: ...
 
 ## Features
 
-- **Performance:** Minimal overhead for maximum read and write throughput.
-- **Seekable:** Fast random access from disk by datapoint index.
-- **Sharding:** Automatically splits large datasets into multiple files.
-- **Flexible:** No predefined types, user provides encoders and decoders.
-- **Sequences:** Datapoints can reference record range of other bag files.
+- 🚀 **Performance:** Minimal overhead for maximum read and write throughput.
+- 🔎 **Seekable:** Fast random access from disk by datapoint index.
+- 🛞 **Sequences:** Datapoints can reference record range of other bag files.
+- 👻 **Flexible:** User provides encoders and decoders; examples available.
+- 🧩 **Sharding:** Can automatically split large datasets into multiple files.
 
 ## Installation
 

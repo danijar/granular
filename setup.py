@@ -19,7 +19,7 @@ def parse_version(filename):
 setuptools.setup(
     name='bags',
     version=parse_version('bags/__init__.py'),
-    description='Simple and fast format for storing datasets.',
+    description='Fast format for datasets.',
     url='http://github.com/danijar/bags',
     long_description=pathlib.Path('README.md').read_text(),
     long_description_content_type='text/markdown',
