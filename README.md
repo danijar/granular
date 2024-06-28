@@ -1,6 +1,6 @@
 [![PyPI](https://img.shields.io/pypi/v/bags.svg)](https://pypi.python.org/pypi/bags/#history)
 
-# 👜 Bags: Fast format for datasets
+# Bags: Fast format for datasets
 
 Bags is a library for reading and writing multimodal datasets. Each dataset is
 a collection of linked files of the [bag file format][bag] type, a simple
@@ -93,7 +93,7 @@ with bags.DatasetReader(directory, decoders) as reader:
   assert reader[0, {'bar': range(1, 2)}] == {'bar': ['world']}
 ```
 
-# Formats
+## Formats
 
 Bags does not impose a serialization solution on the user. Any words can be
 used as types, as long as an encoder and decoder is provided.
@@ -110,6 +110,21 @@ Types can be paremeterized with args that will be forwarded to the encoder and
 decoder, for example `array(float32,64,128)`.
 
 [formats]: https://github.com/danijar/bags/blob/main/bags/formats.py
+
+# Bag
+
+The Bag format is a simple container file type. It simply stores a list of byte
+blobs, following by an index table of integers for all the start locations in
+the file. The start locations are encoded as 8-byte unsigned little-endian and
+also include the end offset of the last blob.
+
+This format allows for fast random access, either by loading the index table
+into memory upfront, or by doing one small read to find the start and end
+locations followed by a targeted large read for the blob content.
+
+Bags builds on top of Bag to read and write datasets of multiple modalities and
+where datapoints can contain sequences of blobs of a modality, with efficient
+seeking for both datapoints and range queries into modalities.
 
 ## Questions
 
