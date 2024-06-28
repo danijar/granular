@@ -19,7 +19,7 @@ class TestBags:
     with bags.Writer(filename) as writer:
       for i in range(100):
         size = rng.integers(4, 100)
-        value = i.to_bytes(size)
+        value = i.to_bytes(size, 'little')
         index = writer.append(value)
         assert index == i
         assert len(writer) == i + 1
@@ -40,14 +40,14 @@ class TestBags:
       for i in range(100):
         size = int(rng.integers(4, 100))
         value = int(rng.integers(0, 1000))
-        writer.append(value.to_bytes(size))
+        writer.append(value.to_bytes(size, 'little'))
         values.append(value)
         total += size
     with bags.Reader(filename, cache_index) as reader:
       assert len(reader) == 100
       for index, reference in enumerate(values):
         value = reader[index]
-        value = int.from_bytes(value)
+        value = int.from_bytes(value, 'little')
         assert value == reference
 
   def test_sharded_writer(
@@ -56,7 +56,7 @@ class TestBags:
     filename = directory / 'file.bag'
     with bags.ShardedWriter(filename, shardsize) as writer:
       for i in range(numitems):
-        index = writer.append(i.to_bytes(itemsize))
+        index = writer.append(i.to_bytes(itemsize, 'little'))
         assert index == i
         assert len(writer) == i + 1
     shardlen = (shardsize - 8) // (itemsize + 8)
@@ -77,14 +77,14 @@ class TestBags:
     filename = directory / 'file.bag'
     with bags.ShardedWriter(filename, shardsize) as writer:
       for i in range(numitems):
-        writer.append(i.to_bytes(itemsize))
+        writer.append(i.to_bytes(itemsize, 'l;ittle'))
     shardlen = (shardsize - 8) // (itemsize + 8)
     numshards = int(np.ceil(numitems / shardlen))
     with bags.ShardedReader(filename, cache_index) as reader:
       assert len(reader) == numitems
       assert reader.size == (itemsize + 8) * numitems + 8 * numshards
       for i in range(numitems):
-        assert int.from_bytes(reader[i]) == i
+        assert int.from_bytes(reader[i], 'little') == i
 
   @pytest.mark.parametrize('cache_index', (True, False))
   def test_single_reader_slicing(self, tmpdir, cache_index):
@@ -92,7 +92,7 @@ class TestBags:
     rng = np.random.default_rng(seed=0)
     with bags.Writer(filename) as writer:
       for i in range(100):
-        writer.append(i.to_bytes(int(rng.integers(4, 32))))
+        writer.append(i.to_bytes(int(rng.integers(4, 32)), 'little'))
     with bags.Reader(filename, cache_index) as reader:
       assert len(reader) == 100
       for requested in (
@@ -104,7 +104,7 @@ class TestBags:
           range(90, 110),
       ):
         values = reader[requested]
-        values = [int.from_bytes(x) for x in values]
+        values = [int.from_bytes(x, 'little') for x in values]
         expected = [x for x in list(requested) if 0 <= x < 100]
         assert values == expected
 
@@ -115,7 +115,7 @@ class TestBags:
     rng = np.random.default_rng(seed=0)
     with bags.ShardedWriter(filename, shardsize) as writer:
       for i in range(100):
-        writer.append(i.to_bytes(int(rng.integers(4, 32))))
+        writer.append(i.to_bytes(int(rng.integers(4, 32)), 'little'))
       assert writer.shards > 1
     with bags.ShardedReader(filename, cache_index) as reader:
       assert len(reader) == 100
@@ -128,7 +128,7 @@ class TestBags:
           range(90, 110),
       ):
         values = reader[requested]
-        values = [int.from_bytes(x) for x in values]
+        values = [int.from_bytes(x, 'little') for x in values]
         expected = [x for x in list(requested) if 0 <= x < 100]
         assert values == expected
 
