@@ -12,9 +12,9 @@ seekable container structure.
 
 - 🚀 **Performance:** Minimal overhead for maximum read and write throughput.
 - 🔎 **Seekable:** Fast random access from disk by datapoint index.
-- 🛞 **Sequences:** Datapoints can reference record range of other bag files.
-- 👻 **Flexible:** User provides encoders and decoders; examples available.
-- 🧩 **Sharding:** Can automatically split large datasets into multiple files.
+- 🎞️ **Sequences:** Datapoints can contain seekable ranges of modalities.
+- 🤸 **Flexible:** User provides encoders and decoders; examples available.
+- 👥 **Sharding:** Store datasets into shards to split processing workloads.
 
 ## Installation
 
@@ -50,19 +50,29 @@ spec = {
 
 shardsize = 10 * 1024 ** 3  # 10GB shards
 
-with bags.DatasetWriter(directory, spec, encoders, shardsize) as writer:
+with bags.ShardedDatasetWriter(directory, spec, encoders, shardsize) as writer:
   writer.append({'foo': 42, 'bar': ['hello', 'world'], 'baz': {'a': 1})
+  # ...
 ```
 
 Files
 
 ```sh
-$ ls directory
-spec.json
-refs-00001.bag
-foo-00001.bag
-bar-00001.bag
-baz-00001.bag
+$ tree directory
+.
+├── 000000
+│  ├── spec.json
+│  ├── refs.bag
+│  ├── foo.bag
+│  ├── bar.bag
+│  └── baz.bag
+├── 000001
+│  ├── spec.json
+│  ├── refs.bag
+│  ├── foo.bag
+│  ├── bar.bag
+│  └── baz.bag
+└── ...
 ```
 
 Reading
@@ -74,8 +84,10 @@ decoders = {
     'msgpack': msgpack.unpackb,
 }
 
-with bags.DatasetReader(directory, decoders) as reader:
-  print(len(reader))
+with bags.ShardedDatasetReader(directory, decoders) as reader:
+  print(len(reader))  # Total number of datapoints.
+  print(reader.size)  # Total dataset size in bytes.
+  print(reader.shards)
 
   # Read data points by index. This will read only the relevant bytes from
   # disk. An additional small read is used when caching index tables is
@@ -92,6 +104,14 @@ with bags.DatasetReader(directory, decoders) as reader:
   # a long video that is stored as list of consecutive MP4 clips.
   assert reader[0, {'bar': range(1, 2)}] == {'bar': ['world']}
 ```
+
+For small datasets where sharding is not necessary, you can also use
+`DatasetReader` and `DatasetWriter`. These can also be used to look at
+the individual shards of a sharded dataset.
+
+For distributed processing using multiple processes or machines, use
+`ShardedDatasetReader` and `ShardedDatasetWriter` and set `shard_start` to the
+worker index and `shard_stop` to the total number of workers.
 
 ## Formats
 

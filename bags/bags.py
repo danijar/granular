@@ -9,6 +9,9 @@ import re
 import msgpack
 
 
+GB = 1024 ** 3
+
+
 def parse_spec(spec):
   assert isinstance(spec, dict), spec
   assert 'refs' not in spec
@@ -29,9 +32,137 @@ def parse_spec(spec):
   return parsed
 
 
-class DatasetWriter:
+class Closing:
 
-  def __init__(self, directory, spec, encoders, shardsize):
+  def __init__(self):
+    self.closed = False
+
+  def __enter__(self):
+    assert not self.closed
+    return self
+
+  def __exit__(self, *e):
+    self.close()
+    self.closed = True
+
+
+class ShardedDatasetWriter(Closing):
+
+  def __init__(
+      self, directory, spec, encoders,
+      shard_size=10 * GB, shard_length=None,
+      shard_start=0, shard_step=1):
+    super().__init__()
+    assert 0 <= shard_start
+    assert 1 <= shard_step
+    if shard_step > 1:
+      print('NOTE: Writing with shard step cannot preserve the record order.')
+    if isinstance(directory, str):
+      directory = pathlib.Path(directory)
+    self.directory = directory
+    self.spec = spec
+    self.encoders = encoders
+    self.shardsize = shard_size
+    self.shardlength = shard_length
+    self.shardstart = shard_start
+    self.shardnum = shard_start
+    self.shardstep = shard_step
+    self.prevshards = 0
+    self.prevsize = 0
+    self.prevlength = 0
+    self.writer = None
+
+  @property
+  def shards(self):
+    return self.prevshards + bool(self.writer)
+
+  @property
+  def size(self):
+    return self.prevsize + (self.writer.size if self.writer else 0)
+
+  def __len__(self):
+    return self.prevlength + (len(self.writer) if self.writer else 0)
+
+  def append(self, datapoint, flush=True):
+    if not self.writer:
+      folder = self.directory / f'{self.shardnum:06}'
+      self.writer = DatasetWriter(folder, self.spec, self.encoders)
+    self.writer.append(datapoint)
+    oversize = self.shardsize and self.writer.size >= self.shardsize
+    overlength = self.shardlength and len(self.writer) >= self.shardlength
+    if oversize or overlength:
+      self.prevshards += 1
+      self.prevsize += self.writer.size
+      self.prevlength += len(self.writer)
+      self.writer.close()
+      self.writer = None
+      self.shardnum += self.shardstep
+    return len(self) - 1
+
+  def flush(self):
+    if not self.specwritten:
+      self.specwritten = True
+      content = json.dumps(self.rawspec).encode('utf-8')
+      (self.directory / 'spec.json').write_bytes(content)
+    self.refwriter.flush()
+    for writer in self.writers.values():
+      writer.flush()
+
+  def close(self):
+    if self.writer:
+      self.writer.close()
+
+
+class ShardedDatasetReader(Closing):
+
+  def __init__(
+      self, directory, decoders, cache_index=True,
+      shard_start=0, shard_step=1):
+    super().__init__()
+    if isinstance(directory, str):
+      directory = pathlib.Path(directory)
+    folders = sorted(directory.glob('*'))
+    assert all(int(x.name) == i for i, x in enumerate(folders)), folders
+    selected = [
+        folders[i] for i in range(shard_start, len(folders), shard_step)]
+    assert selected, (folders, selected, shard_start, shard_step)
+    self.readers = [DatasetReader(x, decoders, cache_index) for x in selected]
+    lengths = [len(x) for x in self.readers]
+    self.stops = list(itertools.accumulate(lengths, operator.add))
+    self.starts = [0] + self.stops[:-1]
+    self.length = sum(lengths)
+
+  @property
+  def size(self):
+    return sum(x.size for x in self.readers)
+
+  @property
+  def shards(self):
+    return len(self.readers)
+
+  @property
+  def spec(self):
+    return self.readers[0].spec
+
+  def __len__(self):
+    return self.length
+
+  def __getitem__(self, index):
+    if not (0 <= index <= self.length):
+      raise IndexError(index)
+    for reader, start, stop in zip(self.readers, self.starts, self.stops):
+      if start <= index < stop:
+        return reader[index - start]
+
+  def close(self):
+    for reader in self.readers:
+      reader.close()
+
+
+class DatasetWriter(Closing):
+
+  def __init__(self, directory, spec, encoders):
+    super().__init__()
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     assert not directory.exists(), directory
@@ -41,13 +172,11 @@ class DatasetWriter:
     self.encoders = encoders
     self.rawspec = spec
     self.spec = parse_spec(spec)
-    self.refwriter = ShardedWriter(
-        self.directory / 'refs.bag', shardsize)
+    self.refwriter = BagWriter(self.directory / 'refs.bag')
     self.writers = {
-        k: ShardedWriter(self.directory / f'{k}.bag', shardsize)
+        k: BagWriter(self.directory / f'{k}.bag')
         for k in self.spec.keys()}
     self.specwritten = False
-    self.closed = False
 
   @property
   def size(self):
@@ -55,13 +184,6 @@ class DatasetWriter:
 
   def __len__(self):
     return len(self.refwriter)
-
-  def __enter__(self):
-    assert not self.closed
-    return self
-
-  def __exit__(self, *e):
-    self.close()
 
   def append(self, datapoint, flush=True):
     assert isinstance(datapoint, dict)
@@ -104,37 +226,29 @@ class DatasetWriter:
       writer.flush()
 
   def close(self):
-    self.closed = True
     self.refwriter.close()
     for writer in self.writers.values():
       writer.close()
 
 
-class DatasetReader:
+class DatasetReader(Closing):
 
   def __init__(self, directory, decoders, cache_index=True):
+    super().__init__()
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     content = (directory / 'spec.json').read_bytes()
     spec = json.loads(content)
     self.decoders = decoders
     self.spec = parse_spec(spec)
-    self.refreader = ShardedReader(directory / 'refs.bag', cache_index)
+    self.refreader = BagReader(directory / 'refs.bag', cache_index)
     self.readers = {
-        k: ShardedReader(directory / f'{k}.bag', cache_index)
+        k: BagReader(directory / f'{k}.bag', cache_index)
         for k in self.spec.keys()}
-    self.closed = False
 
   @property
   def size(self):
     return sum(x.size for x in self.readers.values()) + self.refreader.size
-
-  def __enter__(self):
-    assert not self.closed
-    return self
-
-  def __exit__(self, *e):
-    self.close()
 
   def __len__(self):
     return len(self.refreader)
@@ -192,132 +306,131 @@ class DatasetReader:
     return datapoint
 
   def close(self):
-    assert not self.closed
-    self.closed = True
     self.refreader.close()
     for reader in self.readers.values():
       reader.close()
 
 
-class ShardedWriter:
+# class ShardedWriter:
+#
+#   def __init__(self, filename, shardsize):
+#     if isinstance(filename, str):
+#       filename = pathlib.Path(filename)
+#     self.directory = filename.parent
+#     self.stem = filename.stem
+#     self.suffix = filename.suffix
+#     self.shardsize = shardsize
+#     self.shardnum = 0
+#     self.writer = None
+#     self.closed = False
+#     self.prevsize = 0
+#     self.previndex = 0
+#
+#   @property
+#   def size(self):
+#     return self.prevsize + self.writer.size
+#
+#   @property
+#   def shards(self):
+#     return self.shardnum + 1
+#
+#   def __len__(self):
+#     return self.previndex + len(self.writer)
+#
+#   def __enter__(self):
+#     assert not self.closed
+#     return self
+#
+#   def __exit__(self, *e):
+#     self.close()
+#
+#   def append(self, record, flush=True):
+#     newsize = self.writer and self.writer.size + len(record) + 8 + 8
+#     if self.writer and newsize > self.shardsize:
+#       assert len(self.writer) > 0, (newsize, self.shardsize)
+#       self.prevsize += self.writer.size
+#       self.previndex += len(self.writer)
+#       self.writer.close()
+#       self.writer = None
+#       self.shardnum += 1
+#     if not self.writer:
+#       assert self.shardnum < int(1e6), self.shardnum
+#       name = f'{self.stem}-{self.shardnum:05}{self.suffix}'
+#       fp = (self.directory / name).open('wb')
+#       self.writer = Writer(fp)
+#     index = self.writer.append(record, flush)
+#     return self.previndex + index
+#
+#   def flush(self):
+#     if self.writer:
+#       self.writer.flush()
+#
+#   def close(self):
+#     self.closed = True
+#     if self.writer:
+#       self.writer.close()
+#
+#
+# class ShardedReader:
+#
+#   def __init__(self, filename, cache_index=True):
+#     if isinstance(filename, str):
+#       filename = pathlib.Path(filename)
+#     pattern = str(filename.stem + '-*' + filename.suffix)
+#     filenames = sorted(filename.parent.glob(pattern))
+#     self.readers = [Reader(x, cache_index) for x in filenames]
+#     self.idxoffsets = [0] + list(itertools.accumulate(
+#         [len(x) for x in self.readers[:-1]], operator.add))
+#     self.closed = False
+#
+#   @property
+#   def size(self):
+#     return sum(x.size for x in self.readers)
+#
+#   def __enter__(self):
+#     assert not self.closed
+#     return self
+#
+#   def __exit__(self, *e):
+#     self.close()
+#
+#   def __len__(self):
+#     return self.idxoffsets[-1] + len(self.readers[-1])
+#
+#   def __getitem__(self, index):
+#     assert not self.closed
+#     if isinstance(index, int):
+#       for offset, reader in zip(self.idxoffsets, self.readers):
+#         if index < offset + len(reader):
+#           break
+#       return reader[index - offset]
+#     else:
+#       assert index.start >= 0 and index.stop >= 0 and index.step == 1, index
+#       requests = []
+#       i = index
+#       for offset, reader in zip(self.idxoffsets, self.readers):
+#         if i.stop <= offset + len(reader):
+#           requests.append((reader, range(i.start - offset, i.stop - offset)))
+#           break
+#         elif i.start < offset + len(reader):
+#           requests.append((reader, range(i.start - offset, len(reader))))
+#           i = range(offset + len(reader), i.stop)
+#       records = []
+#       for reader, i in requests:
+#         records.extend(reader[i])
+#       return records
+#
+#   def close(self):
+#     assert not self.closed
+#     self.closed = True
+#     for reader in self.readers:
+#       reader.close()
 
-  def __init__(self, filename, shardsize):
-    if isinstance(filename, str):
-      filename = pathlib.Path(filename)
-    self.directory = filename.parent
-    self.stem = filename.stem
-    self.suffix = filename.suffix
-    self.shardsize = shardsize
-    self.shardnum = 0
-    self.writer = None
-    self.closed = False
-    self.prevsize = 0
-    self.previndex = 0
 
-  @property
-  def size(self):
-    return self.prevsize + self.writer.size
-
-  @property
-  def shards(self):
-    return self.shardnum + 1
-
-  def __len__(self):
-    return self.previndex + len(self.writer)
-
-  def __enter__(self):
-    assert not self.closed
-    return self
-
-  def __exit__(self, *e):
-    self.close()
-
-  def append(self, record, flush=True):
-    newsize = self.writer and self.writer.size + len(record) + 8 + 8
-    if self.writer and newsize > self.shardsize:
-      assert len(self.writer) > 0, (newsize, self.shardsize)
-      self.prevsize += self.writer.size
-      self.previndex += len(self.writer)
-      self.writer.close()
-      self.writer = None
-      self.shardnum += 1
-    if not self.writer:
-      assert self.shardnum < int(1e6), self.shardnum
-      name = f'{self.stem}-{self.shardnum:05}{self.suffix}'
-      fp = (self.directory / name).open('wb')
-      self.writer = Writer(fp)
-    index = self.writer.append(record, flush)
-    return self.previndex + index
-
-  def flush(self):
-    if self.writer:
-      self.writer.flush()
-
-  def close(self):
-    self.closed = True
-    if self.writer:
-      self.writer.close()
-
-
-class ShardedReader:
-
-  def __init__(self, filename, cache_index=True):
-    if isinstance(filename, str):
-      filename = pathlib.Path(filename)
-    pattern = str(filename.stem + '-*' + filename.suffix)
-    filenames = sorted(filename.parent.glob(pattern))
-    self.readers = [Reader(x, cache_index) for x in filenames]
-    self.idxoffsets = [0] + list(itertools.accumulate(
-        [len(x) for x in self.readers[:-1]], operator.add))
-    self.closed = False
-
-  @property
-  def size(self):
-    return sum(x.size for x in self.readers)
-
-  def __enter__(self):
-    assert not self.closed
-    return self
-
-  def __exit__(self, *e):
-    self.close()
-
-  def __len__(self):
-    return self.idxoffsets[-1] + len(self.readers[-1])
-
-  def __getitem__(self, index):
-    assert not self.closed
-    if isinstance(index, int):
-      for offset, reader in zip(self.idxoffsets, self.readers):
-        if index < offset + len(reader):
-          break
-      return reader[index - offset]
-    else:
-      assert index.start >= 0 and index.stop >= 0 and index.step == 1, index
-      requests = []
-      i = index
-      for offset, reader in zip(self.idxoffsets, self.readers):
-        if i.stop <= offset + len(reader):
-          requests.append((reader, range(i.start - offset, i.stop - offset)))
-          break
-        elif i.start < offset + len(reader):
-          requests.append((reader, range(i.start - offset, len(reader))))
-          i = range(offset + len(reader), i.stop)
-      records = []
-      for reader, i in requests:
-        records.extend(reader[i])
-      return records
-
-  def close(self):
-    assert not self.closed
-    self.closed = True
-    for reader in self.readers:
-      reader.close()
-
-
-class Writer:
+class BagWriter(Closing):
 
   def __init__(self, fp):
+    super().__init__()
     if isinstance(fp, str):
       fp = pathlib.Path(fp)
     if hasattr(fp, '__fspath__'):
@@ -329,19 +442,11 @@ class Writer:
     self.offset = 0
     self.length = 0
     self.limits = []
-    self.closed = False
     self.towrite = []
 
   @property
   def size(self):
     return self.offset + 8 * self.length + 8
-
-  def __enter__(self):
-    assert not self.closed
-    return self
-
-  def __exit__(self, *e):
-    self.close()
 
   def __len__(self):
     return self.length
@@ -369,16 +474,16 @@ class Writer:
 
   def close(self):
     assert not self.closed
-    self.closed = True
     self.limits.append(self.offset)
     self.towrite.extend(tuple(x.to_bytes(8, 'little') for x in self.limits))
     self.flush()
     self.fp.close()
 
 
-class Reader:
+class BagReader(Closing):
 
   def __init__(self, fp, cache_index=True):
+    super().__init__()
     if isinstance(fp, str):
       fp = pathlib.Path(fp)
     if hasattr(fp, '__fspath__'):
@@ -395,18 +500,10 @@ class Reader:
     else:
       self.limits = None
     self.fp = fp
-    self.closed = False
 
   @property
   def size(self):
     return self.filesize
-
-  def __enter__(self):
-    assert not self.closed
-    return self
-
-  def __exit__(self, *e):
-    self.close()
 
   def __len__(self):
     return self.length
@@ -438,7 +535,6 @@ class Reader:
 
   def close(self):
     assert not self.closed
-    self.closed = True
     self.fp.close()
 
   def _get_start(self, index):
