@@ -1,4 +1,4 @@
-__version__ = '0.5.0'
+__version__ = '0.5.1'
 
 from .bags import ShardedDatasetWriter
 from .bags import ShardedDatasetReader

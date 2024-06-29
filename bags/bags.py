@@ -237,8 +237,8 @@ class DatasetReader(Closing):
     super().__init__()
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
-    content = (directory / 'spec.json').read_bytes()
-    spec = json.loads(content)
+    with (directory / 'spec.json').open('rb') as f:
+      spec = json.loads(f.read())
     self.decoders = decoders
     self.spec = parse_spec(spec)
     self.refreader = BagReader(directory / 'refs.bag', cache_index)
