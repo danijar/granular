@@ -1,9 +1,9 @@
-[![PyPI](https://img.shields.io/pypi/v/bags.svg)](https://pypi.python.org/pypi/bags/#history)
+[![PyPI](https://img.shields.io/pypi/v/granular.svg)](https://pypi.python.org/pypi/granular/#history)
 
-# Bags: Fast format for datasets
+# Granular: Fast format for datasets
 
-Bags is a library for reading and writing multimodal datasets. Each dataset is
-a collection of linked files of the [bag file format][bag] type, a simple
+Granular is a library for reading and writing multimodal datasets. Each dataset
+is a collection of linked files of the [bag file format][bag], a simple
 seekable container structure.
 
 [bag]: ...
@@ -18,21 +18,21 @@ seekable container structure.
 
 ## Installation
 
-Bags is [a single file][file], so you can just copy it to your project
+Granular is [a single file][file], so you can just copy it to your project
 directory. Or you can install the package:
 
 ```
-pip install bags
+pip install granular
 ```
 
-[file]: https://github.com/danijar/bags/blob/main/bags/bags.py
+[file]: https://github.com/danijar/granular/blob/main/granular/granular.py
 
 ## Quickstart
 
 Writing
 
 ```python3
-import bags
+import granular
 import msgpack
 import numpy as np
 
@@ -50,7 +50,7 @@ spec = {
 
 shardsize = 10 * 1024 ** 3  # 10GB shards
 
-with bags.ShardedDatasetWriter(directory, spec, encoders, shardsize) as writer:
+with granular.ShardedDatasetWriter(directory, spec, encoders, shardsize) as writer:
   writer.append({'foo': 42, 'bar': ['hello', 'world'], 'baz': {'a': 1})
   # ...
 ```
@@ -84,7 +84,7 @@ decoders = {
     'msgpack': msgpack.unpackb,
 }
 
-with bags.ShardedDatasetReader(directory, decoders) as reader:
+with granular.ShardedDatasetReader(directory, decoders) as reader:
   print(len(reader))  # Total number of datapoints.
   print(reader.size)  # Total dataset size in bytes.
   print(reader.shards)
@@ -115,7 +115,7 @@ worker index and `shard_stop` to the total number of workers.
 
 ## Formats
 
-Bags does not impose a serialization solution on the user. Any words can be
+Granular does not impose a serialization solution on the user. Any words can be
 used as types, as long as an encoder and decoder is provided.
 
 Examples of encode and decode functions for common types are provided in
@@ -129,26 +129,26 @@ Examples of encode and decode functions for common types are provided in
 Types can be paremeterized with args that will be forwarded to the encoder and
 decoder, for example `array(float32,64,128)`.
 
-[formats]: https://github.com/danijar/bags/blob/main/bags/formats.py
+[formats]: https://github.com/danijar/granular/blob/main/granular/formats.py
 
 # Bag
 
-The Bag format is a simple container file type. It simply stores a list of byte
-blobs, following by an index table of integers for all the start locations in
-the file. The start locations are encoded as 8-byte unsigned little-endian and
-also include the end offset of the last blob.
+The Bag file format is a simple container file type. It simply stores a list of
+byte blobs, following by an index table of integers for all the start locations
+in the file. The start locations are encoded as 8-byte unsigned little-endian
+and also include the end offset of the last blob.
 
 This format allows for fast random access, either by loading the index table
 into memory upfront, or by doing one small read to find the start and end
 locations followed by a targeted large read for the blob content.
 
-Bags builds on top of Bag to read and write datasets of multiple modalities and
-where datapoints can contain sequences of blobs of a modality, with efficient
-seeking for both datapoints and range queries into modalities.
+Granular builds on top of Bag to read and write datasets of multiple modalities
+and where datapoints can contain sequences of blobs of a modality, with
+efficient seeking for both datapoints and range queries into modalities.
 
 ## Questions
 
 If you have a question, please [file an issue][issues].
 
-[issues]: https://github.com/danijar/bags/issues
+[issues]: https://github.com/danijar/granular/issues
 

@@ -17,13 +17,13 @@ def parse_version(filename):
 
 
 setuptools.setup(
-    name='bags',
-    version=parse_version('bags/__init__.py'),
+    name='granular',
+    version=parse_version('granular/__init__.py'),
     description='Fast format for datasets.',
-    url='http://github.com/danijar/bags',
+    url='http://github.com/danijar/granular',
     long_description=pathlib.Path('README.md').read_text(),
     long_description_content_type='text/markdown',
-    packages=['bags'],
+    packages=['granular'],
     include_package_data=True,
     install_requires=parse_requirements('requirements.txt'),
     classifiers=[
