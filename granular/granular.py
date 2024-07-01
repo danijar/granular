@@ -59,6 +59,10 @@ class ShardedDatasetWriter(Closing):
       print('NOTE: Writing with shard step cannot preserve the record order.')
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
+    try:
+      directory.mkdir()
+    except FileExistsError:
+      pass
     self.directory = directory
     self.rawspec = spec
     self.encoders = encoders
@@ -107,7 +111,8 @@ class ShardedDatasetWriter(Closing):
     if not self.specwritten:
       self.specwritten = True
       content = json.dumps(self.rawspec).encode('utf-8')
-      (self.directory / 'spec.json').write_bytes(content)
+      with (self.directory / 'spec.json').open('wb') as f:
+        f.write(content)
     self.refwriter.flush()
     for writer in self.writers.values():
       writer.flush()
@@ -171,7 +176,7 @@ class DatasetWriter(Closing):
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     assert not directory.exists(), directory
-    directory.mkdir(parents=True)
+    directory.mkdir()
     spec = dict(sorted(spec.items(), key=lambda x: x[0]))
     self.directory = directory
     self.encoders = encoders
@@ -231,7 +236,8 @@ class DatasetWriter(Closing):
     if not self.specwritten:
       self.specwritten = True
       content = json.dumps(self.spec).encode('utf-8')
-      (self.directory / 'spec.json').write_bytes(content)
+      with (self.directory / 'spec.json').open('wb') as f:
+        f.write(content)
     self.refwriter.flush()
     for writer in self.writers.values():
       writer.flush()
