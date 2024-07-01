@@ -1,47 +1,48 @@
-import functools
 import io
+from functools import partial as bind
 
 import msgpack
 
 
-def int_encode(value, size=None, endian='little'):
+def encode_int(value, size=None, endian='little'):
   import numpy as np
   if size is None:
     size = np.ceil(np.log2(1 + value) / 8)
   return value.to_bytes(int(size), endian)
 
 
-def int_decode(buffer, size=None, endian='little'):
+def decode_int(buffer, size=None, endian='little'):
   return int.from_bytes(buffer, endian)
 
 
-def array_encode(value, dtype, *shape):
+def encode_array(value, dtype, *shape):
   import numpy as np
   assert value.dtype == np.dtype(dtype)
   assert value.shape == tuple(int(x) for x in shape)
   return value.tobytes()
 
 
-def array_decode(buffer, dtype, *shape):
+def decode_array(buffer, dtype, *shape):
   import numpy as np
   shape = tuple(int(x) for x in shape)
   return np.frombuffer(buffer, dtype).reshape(shape)
 
 
-def image_encode(value, quality=None, format='jpeg'):
+def encode_image(value, quality=100, format='jpg'):
+  format = ('jpeg' if format == 'jpg' else format).upper()
   from PIL import Image
   stream = io.BytesIO()
-  Image.fromarray(value).save(stream, format=format.upper())
+  Image.fromarray(value).save(stream, format=format)
   return stream.getvalue()
 
 
-def image_decode(buffer, *args):
+def decode_image(buffer, *args):
   import numpy as np
   from PIL import Image
   return np.asarray(Image.open(io.BytesIO(buffer)))
 
 
-def mp4_encode(array, fps=15):
+def encode_mp4(array, fps=20):
   import av
   T, H, W = array.shape[:3]
   fp = io.BytesIO()
@@ -59,7 +60,7 @@ def mp4_encode(array, fps=15):
   return fp.getvalue()
 
 
-def mp4_decode(buffer, *args):
+def decode_mp4(buffer, *args):
   import numpy as np
   import av
   container = av.open(io.BytesIO(buffer))
@@ -76,20 +77,21 @@ encoders = {
     'bytes': lambda x: x,
     'utf8': lambda x: x.encode('utf-8'),
     'msgpack': msgpack.packb,
-    'int': int_encode,
-    'array': array_encode,
-    'jpeg': functools.partial(image_encode, format='jpeg'),
-    'png': functools.partial(image_encode, format='png'),
-    'mp4': mp4_encode,
+    'int': encode_int,
+    'array': encode_array,
+    'jpg': bind(encode_image, format='jpg'),
+    'png': bind(encode_image, format='png'),
+    'mp4': encode_mp4,
 }
+
 
 decoders = {
     'bytes': lambda x: x,
     'utf8': lambda x: x.decode('utf-8'),
     'msgpack': msgpack.unpackb,
-    'int': int_decode,
-    'array': array_decode,
-    'jpeg': image_decode,
-    'png': image_decode,
-    'mp4': mp4_decode,
+    'int': decode_int,
+    'array': decode_array,
+    'jpg': decode_image,
+    'png': decode_image,
+    'mp4': decode_mp4,
 }

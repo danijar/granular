@@ -72,66 +72,6 @@ class TestGranular:
         expected = [x for x in list(requested) if 0 <= x < 100]
         assert values == expected
 
-  # def test_sharded_writer(
-  #     self, tmpdir, shardsize=100, itemsize=20, numitems=10):
-  #   directory = pathlib.Path(tmpdir)
-  #   filename = directory / 'file.bag'
-  #   with granular.ShardedWriter(filename, shardsize) as writer:
-  #     for i in range(numitems):
-  #       index = writer.append(i.to_bytes(itemsize, 'little'))
-  #       assert index == i
-  #       assert len(writer) == i + 1
-  #   shardlen = (shardsize - 8) // (itemsize + 8)
-  #   shardsize = shardlen * (itemsize + 8) + 8
-  #   numshards = int(np.ceil(numitems / shardlen))
-  #   filenames = sorted(directory.glob('*'))
-  #   assert len(filenames) == numshards
-  #   for i, filename in enumerate(filenames):
-  #     assert filename == directory / f'file-{i:>05}.bag'
-  #   for filename in filenames[:-1]:
-  #     assert filename.stat().st_size == shardsize
-  #   assert filenames[-1].stat().st_size <= shardsize
-
-  # @pytest.mark.parametrize('cache_index', (True, False))
-  # def test_sharded_roundtrip(
-  #     self, tmpdir, cache_index, shardsize=100, itemsize=20, numitems=10):
-  #   directory = pathlib.Path(tmpdir)
-  #   filename = directory / 'file.bag'
-  #   with granular.ShardedWriter(filename, shardsize) as writer:
-  #     for i in range(numitems):
-  #       writer.append(i.to_bytes(itemsize, 'little'))
-  #   shardlen = (shardsize - 8) // (itemsize + 8)
-  #   numshards = int(np.ceil(numitems / shardlen))
-  #   with granular.ShardedReader(filename, cache_index) as reader:
-  #     assert len(reader) == numitems
-  #     assert reader.size == (itemsize + 8) * numitems + 8 * numshards
-  #     for i in range(numitems):
-  #       assert int.from_bytes(reader[i], 'little') == i
-
-  # @pytest.mark.parametrize('cache_index', (True, False))
-  # @pytest.mark.parametrize('shardsize', (128, 512))
-  # def test_sharded_reader_slicing(self, tmpdir, cache_index, shardsize):
-  #   filename = pathlib.Path(tmpdir) / 'file.bag'
-  #   rng = np.random.default_rng(seed=0)
-  #   with granular.ShardedWriter(filename, shardsize) as writer:
-  #     for i in range(100):
-  #       writer.append(i.to_bytes(int(rng.integers(4, 32)), 'little'))
-  #     assert writer.shards > 1
-  #   with granular.ShardedReader(filename, cache_index) as reader:
-  #     assert len(reader) == 100
-  #     for requested in (
-  #         range(0),
-  #         range(0, 1),
-  #         range(0, 10),
-  #         range(3, 5),
-  #         range(90, 100),
-  #         range(90, 110),
-  #     ):
-  #       values = reader[requested]
-  #       values = [int.from_bytes(x, 'little') for x in values]
-  #       expected = [x for x in list(requested) if 0 <= x < 100]
-  #       assert values == expected
-
   def test_dataset_writer(self, tmpdir):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'foo': 'utf8', 'bar': 'int(4)', 'baz': 'utf8[]'}
@@ -151,7 +91,8 @@ class TestGranular:
     assert spec == spec2
 
   @pytest.mark.parametrize('cache_index', (True, False))
-  def test_dataset_roundtrip(self, tmpdir, cache_index):
+  @pytest.mark.parametrize('cache_refs', (True, False))
+  def test_dataset_roundtrip(self, tmpdir, cache_index, cache_refs):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int(4)', 'baz': 'utf8[]', 'foo': 'utf8'}
     datapoints = []
@@ -162,7 +103,8 @@ class TestGranular:
         writer.append(datapoint)
         datapoints.append(datapoint)
       size = writer.size
-    with granular.DatasetReader(directory, granular.decoders, cache_index) as reader:
+    with granular.DatasetReader(
+        directory, granular.decoders, cache_index, cache_refs) as reader:
       assert len(reader) == 10
       assert reader.size == size
       for i in range(10):
@@ -170,7 +112,8 @@ class TestGranular:
         assert datapoint == datapoints[i]
 
   @pytest.mark.parametrize('cache_index', (True, False))
-  def test_dataset_slicing(self, tmpdir, cache_index):
+  @pytest.mark.parametrize('cache_refs', (True, False))
+  def test_dataset_slicing(self, tmpdir, cache_index, cache_refs):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'foo': 'utf8', 'bar': 'int(4)', 'baz': 'utf8[]'}
     with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
@@ -178,7 +121,8 @@ class TestGranular:
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
         writer.append(datapoint)
-    with granular.DatasetReader(directory, granular.decoders, cache_index) as reader:
+    with granular.DatasetReader(
+        directory, granular.decoders, cache_index, cache_refs) as reader:
       assert reader[3, {}] == {}
       assert reader[3, {'foo': True}] == {'foo': 'hello world'}
       with pytest.raises(TypeError):
@@ -197,6 +141,7 @@ class TestGranular:
     spec = {'bar': 'int(4)', 'baz': 'utf8[]', 'foo': 'utf8'}
     with granular.ShardedDatasetWriter(
         directory, spec, granular.encoders, shard_size) as writer:
+      assert writer.spec == spec
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
@@ -237,6 +182,7 @@ class TestGranular:
     datapoints = []
     with granular.ShardedDatasetWriter(
         directory, spec, granular.encoders, shard_size) as writer:
+      assert writer.spec == spec
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
@@ -245,6 +191,7 @@ class TestGranular:
       shards = writer.shards
       size = writer.size
     with granular.ShardedDatasetReader(directory, granular.decoders) as reader:
+      assert reader.spec == spec
       assert reader.shards == shards
       assert reader.size == size
       assert len(reader) == 10
@@ -304,15 +251,15 @@ class TestGranular:
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {
         'a': 'utf8',
-        'b': 'int(4)',
+        'b': 'int',
         'c': 'utf8[]',
         'd': 'msgpack',
         'e': 'int[]',
         'f': 'bytes',
         'g': 'array(float32,10,4)',
-        'h': 'jpeg(80)',
+        'h': 'jpg',
         'i': 'png',
-        'j': 'mp4(15)',
+        'j': 'mp4',
     }
     datapoints = []
     for i in range(10):
@@ -329,9 +276,11 @@ class TestGranular:
           'j': np.zeros((20, 80, 60, 3), np.uint8),
       })
     with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
+      assert writer.spec == spec
       for datapoint in datapoints:
         writer.append(datapoint)
     with granular.DatasetReader(directory, granular.decoders) as reader:
+      assert reader.spec == spec
       for i in range(len(reader)):
         actual = reader[i]
         reference = datapoints[i]
