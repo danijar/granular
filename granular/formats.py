@@ -15,17 +15,18 @@ def decode_int(buffer, size=None, endian='little'):
   return int.from_bytes(buffer, endian)
 
 
-def encode_array(value, dtype, *shape):
-  import numpy as np
-  assert value.dtype == np.dtype(dtype)
-  assert value.shape == tuple(int(x) for x in shape)
-  return value.tobytes()
+def encode_array(value):
+  assert value.data.c_contiguous
+  header = msgpack.packb((value.dtype.str, value.shape))
+  hsize = len(header).to_bytes(4, 'little')
+  return hsize + header + value.data
 
 
-def decode_array(buffer, dtype, *shape):
+def decode_array(buffer):
   import numpy as np
-  shape = tuple(int(x) for x in shape)
-  return np.frombuffer(buffer, dtype).reshape(shape)
+  hsize = int.from_bytes(buffer[:4], 'little')
+  dtype, shape = msgpack.unpackb(buffer[4: 4 + hsize])
+  return np.frombuffer(buffer[4 + hsize:], dtype).reshape(shape)
 
 
 def encode_image(value, quality=100, format='jpg'):

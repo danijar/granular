@@ -4,32 +4,8 @@ import json
 import operator
 import os
 import pathlib
-import re
 
 import msgpack
-
-
-GB = 1024 ** 3
-
-
-def parse_spec(spec):
-  assert isinstance(spec, dict), spec
-  assert 'refs' not in spec
-  assert list(spec.keys()) == sorted(spec.keys())
-  parsed = {}
-  for key, value in spec.items():
-    assert isinstance(key, str), key
-    islist = value.endswith('[]')
-    value = value[:-2] if islist else value
-    mat = re.match(r'^([a-z0-9-_]+)(\([a-z0-9-_,.]*\))?$', value)
-    assert mat, (key, value)
-    dtype = mat.group(1)
-    if mat.group(2):
-      args = tuple(mat.group(2)[1:-1].split(','))
-    else:
-      args = ()
-    parsed[key] = (islist, dtype, args)
-  return parsed
 
 
 class Closing:
@@ -50,21 +26,24 @@ class ShardedDatasetWriter(Closing):
 
   def __init__(
       self, directory, spec, encoders=None,
-      shardlen=None,
-      shardstart=0, shardstep=1):
+      shardlen=None, shardstart=0, shardstep=1):
     super().__init__()
     assert 0 <= shardstart
     assert 1 <= shardstep
-    if shardstep > 1:
-      print('NOTE: Writing with shard step cannot preserve the record order.')
+    if shardstart > 0 or shardstep > 1:
+      assert shardlen, shardlen
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     try:
       directory.mkdir()
     except FileExistsError:
       pass
+    if encoders is None:
+      encoders = {k: None for k in spec.keys()}
+    assert set(encoders.keys()) == set(spec.keys()), (encoders.keys(), spec)
+    self.encoders = encoders
     self.directory = directory
-    self.rawspec = spec
+    self.thespec = spec
     self.encoders = encoders
     self.shardlength = shardlen
     self.shardstart = shardstart
@@ -77,7 +56,7 @@ class ShardedDatasetWriter(Closing):
 
   @property
   def spec(self):
-    return self.rawspec
+    return self.thespec
 
   @property
   def shards(self):
@@ -107,7 +86,7 @@ class ShardedDatasetWriter(Closing):
   def flush(self):
     if not self.specwritten:
       self.specwritten = True
-      content = json.dumps(self.rawspec).encode('utf-8')
+      content = json.dumps(self.spec).encode('utf-8')
       with (self.directory / 'spec.json').open('wb') as f:
         f.write(content)
     self.refwriter.flush()
@@ -175,19 +154,21 @@ class DatasetWriter(Closing):
     assert not directory.exists(), directory
     directory.mkdir()
     spec = dict(sorted(spec.items(), key=lambda x: x[0]))
+    if encoders is None:
+      encoders = {k: None for k in spec.keys()}
+    assert set(encoders.keys()) == set(spec.keys()), (encoders.keys(), spec)
     self.directory = directory
     self.encoders = encoders
-    self.rawspec = spec
-    self.parsedspec = parse_spec(spec)
+    self.thespec = spec
     self.refwriter = BagWriter(self.directory / 'refs.bag')
     self.writers = {
         k: BagWriter(self.directory / f'{k}.bag')
-        for k in self.parsedspec.keys()}
+        for k in self.spec.keys()}
     self.specwritten = False
 
   @property
   def spec(self):
-    return self.rawspec
+    return self.thespec
 
   @property
   def size(self):
@@ -198,19 +179,17 @@ class DatasetWriter(Closing):
 
   def append(self, datapoint, flush=True):
     assert isinstance(datapoint, dict)
-    assert set(datapoint.keys()) == set(self.parsedspec.keys()), (
-        datapoint.keys(), self.parsedspec)
+    assert set(datapoint.keys()) == set(self.spec.keys()), (
+        datapoint.keys(), self.spec)
     refs = []
     # Iterate in sorted key order.
-    for key, (islist, dtype, args) in self.parsedspec.items():
+    for key, dtype in self.spec.items():
       writer = self.writers[key]
-      if islist:
+      if dtype.endswith('[]'):
         # Hold only one value of the generator in memory at a time.
         indices = []
         for value in datapoint[key]:
-          if self.encoders is not None:
-            value = self.encoders[dtype](value, *args)
-          assert isinstance(value, bytes), (key, type(value))
+          value = self._encode(key, value, dtype)
           index = writer.append(value, flush=False)
           indices.append(index)
         if indices:
@@ -219,9 +198,7 @@ class DatasetWriter(Closing):
           refs.append([])
       else:
         value = datapoint[key]
-        if self.encoders is not None:
-          value = self.encoders[dtype](value, *args)
-        assert isinstance(value, bytes), (key, type(value))
+        value = self._encode(key, value, dtype)
         index = writer.append(value, flush=False)
         refs.append(index)
     refs = msgpack.packb(refs)
@@ -244,6 +221,18 @@ class DatasetWriter(Closing):
     for writer in self.writers.values():
       writer.close()
 
+  def _encode(self, key, value, dtype):
+    encoder = self.encoders[key]
+    if not encoder:
+      return value
+    try:
+      value = encoder(value)
+      assert isinstance(value, bytes), (key, type(value))
+      return value
+    except Exception:
+      print(f"Error encoding key '{key}' of type '{dtype}'.")
+      raise
+
 
 class DatasetReader(Closing):
 
@@ -253,9 +242,12 @@ class DatasetReader(Closing):
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     with (directory / 'spec.json').open('rb') as f:
-      self.rawspec = json.loads(f.read())
+      self.thespec = json.loads(f.read())
+    if decoders is None:
+      decoders = {k: None for k in self.spec.keys()}
+    assert set(decoders.keys()) == set(self.spec.keys()), (
+        sorted(decoders.keys()), sorted(self.spec.keys()))
     self.decoders = decoders
-    self.parsedspec = parse_spec(self.rawspec)
     if cache_refs:
       fp = io.BytesIO((directory / 'refs.bag').read_bytes())
       self.refreader = BagReader(fp, cache_index)
@@ -263,11 +255,11 @@ class DatasetReader(Closing):
       self.refreader = BagReader(directory / 'refs.bag', cache_index)
     self.readers = {
         k: BagReader(directory / f'{k}.bag', cache_index)
-        for k in self.parsedspec.keys()}
+        for k in self.spec.keys()}
 
   @property
   def spec(self):
-    return self.rawspec
+    return self.thespec
 
   @property
   def size(self):
@@ -281,15 +273,15 @@ class DatasetReader(Closing):
       index, mask = index
       assert isinstance(mask, dict), mask
     else:
-      mask = {k: True for k in self.parsedspec.keys()}
-    assert all(k in self.parsedspec for k in mask), (self.parsedspec, mask)
+      mask = {k: True for k in self.spec.keys()}
+    assert all(k in self.spec for k in mask), (self.spec, mask)
     refs = self.refreader[index]
     refs = msgpack.unpackb(refs)
     datapoint = {}
-    for i, (key, (islist, dtype, args)) in enumerate(self.parsedspec.items()):
+    for i, (key, dtype) in enumerate(self.spec.items()):
       msk = mask.get(key, False)
       reader = self.readers[key]
-      if islist:
+      if dtype.endswith('[]'):
         if not msk:
           continue
         # Construct available range.
@@ -312,8 +304,7 @@ class DatasetReader(Closing):
         if requested:
           assert isinstance(requested, range)
           values = reader[requested]
-          if self.decoders is not None:
-            values = [self.decoders[dtype](x, *args) for x in values]
+          values = [self._decode(key, x, dtype) for x in values]
           datapoint[key] = values
         else:
           datapoint[key] = []
@@ -325,8 +316,7 @@ class DatasetReader(Closing):
         idx = refs[i]
         assert isinstance(idx, int)
         value = reader[idx]
-        if self.decoders is not None:
-          value = self.decoders[dtype](value, *args)
+        value = self._decode(key, value, dtype)
         datapoint[key] = value
     return datapoint
 
@@ -334,6 +324,16 @@ class DatasetReader(Closing):
     self.refreader.close()
     for reader in self.readers.values():
       reader.close()
+
+  def _decode(self, key, value, dtype):
+    decoder = self.decoders[key]
+    if not decoder:
+      return value
+    try:
+      return decoder(value)
+    except Exception:
+      print(f"Error decoding key '{key}' of type '{dtype}'.")
+      raise
 
 
 class BagWriter(Closing):

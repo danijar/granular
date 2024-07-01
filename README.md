@@ -36,21 +36,20 @@ import granular
 import msgpack
 import numpy as np
 
-encoders = {
-    'utf8': lambda x: x.encode('utf-8'),
-    'int': lambda x, size: x.to_bytes(int(size), 'little'),
-    'msgpack': msgpack.packb,
-}
-
 spec = {
-    'foo': 'int(8)',   # 8-byte integer
+    'foo': 'int',      # integer
     'bar': 'utf8[]',   # list of strings
     'baz': 'msgpack',  # packed structure
 }
 
-shardsize = 10 * 1024 ** 3  # 10GB shards
+encoders = {
+    'foo': lambda x: x.to_bytes(8, 'little'),
+    'bar': lambda x: x.encode('utf-8'),
+    'baz': msgpack.packb,
+}
 
-with granular.ShardedDatasetWriter(directory, spec, encoders, shardsize) as writer:
+with granular.ShardedDatasetWriter(
+    directory, spec, encoders, shardlen=1000) as writer:
   writer.append({'foo': 42, 'bar': ['hello', 'world'], 'baz': {'a': 1})
   # ...
 ```
@@ -79,15 +78,15 @@ Reading
 
 ```python
 decoders = {
-    'utf8': lambda x: x.decode('utf-8'),
-    'int': lambda x, size=None: int.from_bytes(x),
-    'msgpack': msgpack.unpackb,
+    'foo': lambda x: int.from_bytes(x),
+    'bar': lambda x: x.decode('utf-8'),
+    'baz': msgpack.unpackb,
 }
 
 with granular.ShardedDatasetReader(directory, decoders) as reader:
-  print(len(reader))  # Total number of datapoints.
-  print(reader.size)  # Total dataset size in bytes.
-  print(reader.shards)
+  print(len(reader))    # Number of datapoints in the dataset.
+  print(reader.size)    # Dataset size in bytes.
+  print(reader.shards)  # Number of shards.
 
   # Read data points by index. This will read only the relevant bytes from
   # disk. An additional small read is used when caching index tables is
@@ -106,45 +105,30 @@ with granular.ShardedDatasetReader(directory, decoders) as reader:
 ```
 
 For small datasets where sharding is not necessary, you can also use
-`DatasetReader` and `DatasetWriter`. These can also be used to look at
-the individual shards of a sharded dataset.
+`DatasetReader` and `DatasetWriter`.
 
 For distributed processing using multiple processes or machines, use
-`ShardedDatasetReader` and `ShardedDatasetWriter` and set `shard_start` to the
-worker index and `shard_stop` to the total number of workers.
+`ShardedDatasetReader` and `ShardedDatasetWriter` and set `shardstart` to the
+worker index and `shardstop` to the total number of workers.
 
 ## Formats
 
 Granular does not impose a serialization solution on the user. Any words can be
-used as types, as long as an encoder and decoder is provided.
+used as types, as long as encoder and decoder functions are provided.
 
-Examples of encode and decode functions for common types are provided in
-[formats.py][formats] and include:
+Examples of common encode and decode functions are provided in
+[formats.py][formats]. These support Numpy arrays, JPG and PNG images, MP4
+videos, and more.
 
-- Numpy
-- JPEG
-- PNG
-- MP4
+You can also use the provided functions for all keys like this:
 
-Types can be paremeterized with args that will be forwarded to the encoder and
-decoder, for example `array(float32,64,128)`.
+```python
+spec = {'foo': 'int', 'bar': 'utf8[]', 'baz': 'msgpack'}
+encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
+decoders = {k: granular.decoders[v.strip('[]')] for k, v in spec.items()}
+```
 
 [formats]: https://github.com/danijar/granular/blob/main/granular/formats.py
-
-# Bag
-
-The Bag file format is a simple container file type. It simply stores a list of
-byte blobs, following by an index table of integers for all the start locations
-in the file. The start locations are encoded as 8-byte unsigned little-endian
-and also include the end offset of the last blob.
-
-This format allows for fast random access, either by loading the index table
-into memory upfront, or by doing one small read to find the start and end
-locations followed by a targeted large read for the blob content.
-
-Granular builds on top of Bag to read and write datasets of multiple modalities
-and where datapoints can contain sequences of blobs of a modality, with
-efficient seeking for both datapoints and range queries into modalities.
 
 ## Questions
 
