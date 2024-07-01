@@ -135,53 +135,49 @@ class TestGranular:
       with pytest.raises(TypeError):
         assert reader[3, {'bar': range(1)}]
 
-  @pytest.mark.parametrize('shard_size', (None, 1, 200, 1000))
-  def test_sharded_writer(self, tmpdir, shard_size):
+  @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
+  def test_sharded_writer(self, tmpdir, shardlen):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int(4)', 'baz': 'utf8[]', 'foo': 'utf8'}
     with granular.ShardedDatasetWriter(
-        directory, spec, granular.encoders, shard_size) as writer:
+        directory, spec, granular.encoders, shardlen) as writer:
       assert writer.spec == spec
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
         writer.append(datapoint)
-      shards = writer.shards
-    if shard_size == 1:
-      assert shards == 10
-    elif shard_size is None or shard_size == 1000:
-      assert shards == 1
-    else:
-      assert 2 <= shards <= 8
+      if shardlen:
+        assert writer.shards == int(np.ceil(10 / shardlen))
+      else:
+        assert writer.shards == 1
     assert set(x.name for x in directory.glob('*')) == {
         f'{i:06}' for i in range(writer.shards)}
     for folder in directory.glob('*'):
       assert set(x.name for x in folder.glob('*')) == {
           'spec.json', 'refs.bag', 'bar.bag', 'baz.bag', 'foo.bag'}
 
-  @pytest.mark.parametrize('shard_length', (None, 1, 5))
-  def test_sharded_writer_length(self, tmpdir, shard_length):
+  @pytest.mark.parametrize('shardlen', (None, 1, 5))
+  def test_sharded_writer_length(self, tmpdir, shardlen):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int(4)', 'baz': 'utf8[]', 'foo': 'utf8'}
     with granular.ShardedDatasetWriter(
-        directory, spec, granular.encoders,
-        shard_length=shard_length) as writer:
+        directory, spec, granular.encoders, shardlen) as writer:
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
         writer.append(datapoint)
-      if shard_length:
-        assert writer.shards == int(np.ceil(10 / shard_length))
+      if shardlen:
+        assert writer.shards == int(np.ceil(10 / shardlen))
       else:
         assert writer.shards == 1
 
-  @pytest.mark.parametrize('shard_size', (None, 1, 200, 1000))
-  def test_sharded_roundtrip(self, tmpdir, shard_size):
+  @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
+  def test_sharded_roundtrip(self, tmpdir, shardlen):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int(4)', 'baz': 'utf8[]', 'foo': 'utf8'}
     datapoints = []
     with granular.ShardedDatasetWriter(
-        directory, spec, granular.encoders, shard_size) as writer:
+        directory, spec, granular.encoders, shardlen) as writer:
       assert writer.spec == spec
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
@@ -198,9 +194,9 @@ class TestGranular:
       for i in range(10):
         assert reader[i] == datapoints[i]
 
-  @pytest.mark.parametrize('shard_size', (None, 1, 200, 1000))
+  @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
   @pytest.mark.parametrize('nworkers', (1, 2, 3, 10))
-  def test_distributed_writer(self, tmpdir, shard_size, nworkers):
+  def test_distributed_writer(self, tmpdir, shardlen, nworkers):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int(4)', 'baz': 'utf8[]'}
     datapoints = [{'bar': i, 'baz': ['hello'] * i} for i in range(10)]
@@ -208,8 +204,8 @@ class TestGranular:
     size = 0
     for worker in range(nworkers):
       with granular.ShardedDatasetWriter(
-          directory, spec, granular.encoders, shard_size,
-          shard_start=worker, shard_step=nworkers) as writer:
+          directory, spec, granular.encoders, shardlen,
+          shardstart=worker, shardstep=nworkers) as writer:
         for i in range(worker, 10, nworkers):
           writer.append(datapoints[i])
         shards += writer.shards
@@ -222,9 +218,9 @@ class TestGranular:
       received = sorted(received, key=lambda x: x['bar'])
       assert datapoints == received
 
-  @pytest.mark.parametrize('shard_size', (None, 1, 200, 1000))
+  @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
   @pytest.mark.parametrize('nworkers', (1, 2, 3, 10))
-  def test_distributed_roundtrip(self, tmpdir, shard_size, nworkers):
+  def test_distributed_roundtrip(self, tmpdir, shardlen, nworkers):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int(4)', 'baz': 'utf8[]'}
     datapoints = [{'bar': i, 'baz': ['hello'] * i} for i in range(10)]
@@ -232,8 +228,8 @@ class TestGranular:
     size = 0
     for worker in range(nworkers):
       with granular.ShardedDatasetWriter(
-          directory, spec, granular.encoders, shard_size,
-          shard_start=worker, shard_step=nworkers) as writer:
+          directory, spec, granular.encoders, shardlen,
+          shardstart=worker, shardstep=nworkers) as writer:
         for i in range(worker, 10, nworkers):
           writer.append(datapoints[i])
         shards += writer.shards
@@ -242,7 +238,7 @@ class TestGranular:
     for worker in range(nworkers):
       with granular.ShardedDatasetReader(
           directory, granular.decoders,
-          shard_start=worker, shard_step=nworkers) as reader:
+          shardstart=worker, shardstep=nworkers) as reader:
         received += [reader[i] for i in range(len(reader))]
     received = sorted(received, key=lambda x: x['bar'])
     assert datapoints == received

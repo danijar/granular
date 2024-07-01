@@ -50,12 +50,12 @@ class ShardedDatasetWriter(Closing):
 
   def __init__(
       self, directory, spec, encoders=None,
-      shard_size=10 * GB, shard_length=None,
-      shard_start=0, shard_step=1):
+      shardlen=None,
+      shardstart=0, shardstep=1):
     super().__init__()
-    assert 0 <= shard_start
-    assert 1 <= shard_step
-    if shard_step > 1:
+    assert 0 <= shardstart
+    assert 1 <= shardstep
+    if shardstep > 1:
       print('NOTE: Writing with shard step cannot preserve the record order.')
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
@@ -66,11 +66,10 @@ class ShardedDatasetWriter(Closing):
     self.directory = directory
     self.rawspec = spec
     self.encoders = encoders
-    self.shardsize = shard_size
-    self.shardlength = shard_length
-    self.shardstart = shard_start
-    self.shardnum = shard_start
-    self.shardstep = shard_step
+    self.shardlength = shardlen
+    self.shardstart = shardstart
+    self.shardnum = shardstart
+    self.shardstep = shardstep
     self.prevshards = 0
     self.prevsize = 0
     self.prevlength = 0
@@ -96,9 +95,7 @@ class ShardedDatasetWriter(Closing):
       folder = self.directory / f'{self.shardnum:06}'
       self.writer = DatasetWriter(folder, self.spec, self.encoders)
     self.writer.append(datapoint)
-    oversize = self.shardsize and self.writer.size >= self.shardsize
-    overlength = self.shardlength and len(self.writer) >= self.shardlength
-    if oversize or overlength:
+    if self.shardlength and len(self.writer) >= self.shardlength:
       self.prevshards += 1
       self.prevsize += self.writer.size
       self.prevlength += len(self.writer)
@@ -126,15 +123,15 @@ class ShardedDatasetReader(Closing):
 
   def __init__(
       self, directory, decoders=None, cache_index=True, cache_refs=False,
-      shard_start=0, shard_step=1):
+      shardstart=0, shardstep=1):
     super().__init__()
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     folders = sorted(directory.glob('*'))
     assert all(int(x.name) == i for i, x in enumerate(folders)), folders
     selected = [
-        folders[i] for i in range(shard_start, len(folders), shard_step)]
-    assert selected, (folders, selected, shard_start, shard_step)
+        folders[i] for i in range(shardstart, len(folders), shardstep)]
+    assert selected, (folders, selected, shardstart, shardstep)
     self.readers = [
         DatasetReader(x, decoders, cache_index, cache_refs) for x in selected]
     lengths = [len(x) for x in self.readers]
