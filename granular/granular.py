@@ -60,7 +60,7 @@ class ShardedDatasetWriter(Closing):
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     self.directory = directory
-    self.spec = spec
+    self.spec = spec  # Public attribute.
     self.encoders = encoders
     self.shardsize = shard_size
     self.shardlength = shard_length
@@ -133,16 +133,16 @@ class ShardedDatasetReader(Closing):
     self.length = sum(lengths)
 
   @property
+  def spec(self):
+    return self.readers[0].spec
+
+  @property
   def size(self):
     return sum(x.size for x in self.readers)
 
   @property
   def shards(self):
     return len(self.readers)
-
-  @property
-  def spec(self):
-    return self.readers[0].spec
 
   def __len__(self):
     return self.length
@@ -170,12 +170,12 @@ class DatasetWriter(Closing):
     spec = dict(sorted(spec.items(), key=lambda x: x[0]))
     self.directory = directory
     self.encoders = encoders
-    self.rawspec = spec
-    self.spec = parse_spec(spec)
+    self.spec = spec  # Public attribute.
+    self.parsedspec = parse_spec(spec)
     self.refwriter = BagWriter(self.directory / 'refs.bag')
     self.writers = {
         k: BagWriter(self.directory / f'{k}.bag')
-        for k in self.spec.keys()}
+        for k in self.parsedspec.keys()}
     self.specwritten = False
 
   @property
@@ -187,17 +187,18 @@ class DatasetWriter(Closing):
 
   def append(self, datapoint, flush=True):
     assert isinstance(datapoint, dict)
-    assert set(datapoint.keys()) == set(self.spec.keys()), (
-        datapoint.keys(), self.spec)
+    assert set(datapoint.keys()) == set(self.parsedspec.keys()), (
+        datapoint.keys(), self.parsedspec)
     refs = []
     # Iterate in sorted key order.
-    for key, (islist, dtype, args) in self.spec.items():
+    for key, (islist, dtype, args) in self.parsedspec.items():
       writer = self.writers[key]
       if islist:
         # Hold only one value of the generator in memory at a time.
         indices = []
         for value in datapoint[key]:
-          value = self.encoders[dtype](value, *args)
+          if self.encoders is not None:
+            value = self.encoders[dtype](value, *args)
           assert isinstance(value, bytes), (key, type(value))
           index = writer.append(value, flush=False)
           indices.append(index)
@@ -207,7 +208,8 @@ class DatasetWriter(Closing):
           refs.append([])
       else:
         value = datapoint[key]
-        value = self.encoders[dtype](value, *args)
+        if self.encoders is not None:
+          value = self.encoders[dtype](value, *args)
         assert isinstance(value, bytes), (key, type(value))
         index = writer.append(value, flush=False)
         refs.append(index)
@@ -219,7 +221,7 @@ class DatasetWriter(Closing):
   def flush(self):
     if not self.specwritten:
       self.specwritten = True
-      content = json.dumps(self.rawspec).encode('utf-8')
+      content = json.dumps(self.spec).encode('utf-8')
       (self.directory / 'spec.json').write_bytes(content)
     self.refwriter.flush()
     for writer in self.writers.values():
@@ -238,13 +240,13 @@ class DatasetReader(Closing):
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     with (directory / 'spec.json').open('rb') as f:
-      spec = json.loads(f.read())
+      self.spec = json.loads(f.read())  # Public attribute.
     self.decoders = decoders
-    self.spec = parse_spec(spec)
+    self.parsedspec = parse_spec(self.spec)
     self.refreader = BagReader(directory / 'refs.bag', cache_index)
     self.readers = {
         k: BagReader(directory / f'{k}.bag', cache_index)
-        for k in self.spec.keys()}
+        for k in self.parsedspec.keys()}
 
   @property
   def size(self):
@@ -258,12 +260,12 @@ class DatasetReader(Closing):
       index, mask = index
       assert isinstance(mask, dict), mask
     else:
-      mask = {k: True for k in self.spec.keys()}
-    assert all(k in self.spec for k in mask), (self.spec, mask)
+      mask = {k: True for k in self.parsedspec.keys()}
+    assert all(k in self.parsedspec for k in mask), (self.parsedspec, mask)
     refs = self.refreader[index]
     refs = msgpack.unpackb(refs)
     datapoint = {}
-    for i, (key, (islist, dtype, args)) in enumerate(self.spec.items()):
+    for i, (key, (islist, dtype, args)) in enumerate(self.parsedspec.items()):
       msk = mask.get(key, False)
       reader = self.readers[key]
       if islist:
@@ -289,7 +291,8 @@ class DatasetReader(Closing):
         if requested:
           assert isinstance(requested, range)
           values = reader[requested]
-          values = [self.decoders[dtype](x, *args) for x in values]
+          if self.decoders is not None:
+            values = [self.decoders[dtype](x, *args) for x in values]
           datapoint[key] = values
         else:
           datapoint[key] = []
@@ -301,7 +304,8 @@ class DatasetReader(Closing):
         idx = refs[i]
         assert isinstance(idx, int)
         value = reader[idx]
-        value = self.decoders[dtype](value, *args)
+        if self.decoders is not None:
+          value = self.decoders[dtype](value, *args)
         datapoint[key] = value
     return datapoint
 
