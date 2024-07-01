@@ -75,8 +75,7 @@ class TestGranular:
   def test_dataset_writer(self, tmpdir):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'foo': 'utf8', 'bar': 'int', 'baz': 'utf8[]'}
-    encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
-    with granular.DatasetWriter(directory, spec, encoders) as writer:
+    with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         index = writer.append({'foo': 'hello world', 'bar': i, 'baz': baz})
@@ -97,9 +96,7 @@ class TestGranular:
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
     datapoints = []
-    encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
-    decoders = {k: granular.decoders[v.strip('[]')] for k, v in spec.items()}
-    with granular.DatasetWriter(directory, spec, encoders) as writer:
+    with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
@@ -107,7 +104,7 @@ class TestGranular:
         datapoints.append(datapoint)
       size = writer.size
     with granular.DatasetReader(
-        directory, decoders, cache_index, cache_refs) as reader:
+        directory, granular.decoders, cache_index, cache_refs) as reader:
       assert len(reader) == 10
       assert reader.size == size
       for i in range(10):
@@ -119,15 +116,13 @@ class TestGranular:
   def test_dataset_slicing(self, tmpdir, cache_index, cache_refs):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'foo': 'utf8', 'bar': 'int', 'baz': 'utf8[]'}
-    encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
-    decoders = {k: granular.decoders[v.strip('[]')] for k, v in spec.items()}
-    with granular.DatasetWriter(directory, spec, encoders) as writer:
+    with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
         writer.append(datapoint)
     with granular.DatasetReader(
-        directory, decoders, cache_index, cache_refs) as reader:
+        directory, granular.decoders, cache_index, cache_refs) as reader:
       assert reader[3, {}] == {}
       assert reader[3, {'foo': True}] == {'foo': 'hello world'}
       with pytest.raises(TypeError):
@@ -144,9 +139,8 @@ class TestGranular:
   def test_sharded_writer(self, tmpdir, shardlen):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
-    encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
     with granular.ShardedDatasetWriter(
-        directory, spec, encoders, shardlen) as writer:
+        directory, spec, granular.encoders, shardlen) as writer:
       assert writer.spec == spec
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
@@ -166,9 +160,8 @@ class TestGranular:
   def test_sharded_writer_length(self, tmpdir, shardlen):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
-    encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
     with granular.ShardedDatasetWriter(
-        directory, spec, encoders, shardlen) as writer:
+        directory, spec, granular.encoders, shardlen) as writer:
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
@@ -182,11 +175,9 @@ class TestGranular:
   def test_sharded_roundtrip(self, tmpdir, shardlen):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
-    encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
-    decoders = {k: granular.decoders[v.strip('[]')] for k, v in spec.items()}
     datapoints = []
     with granular.ShardedDatasetWriter(
-        directory, spec, encoders, shardlen) as writer:
+        directory, spec, granular.encoders, shardlen) as writer:
       assert writer.spec == spec
       for i in range(10):
         baz = [f'word{j}' for j in range(i)]
@@ -195,7 +186,7 @@ class TestGranular:
         datapoints.append(datapoint)
       shards = writer.shards
       size = writer.size
-    with granular.ShardedDatasetReader(directory, decoders) as reader:
+    with granular.ShardedDatasetReader(directory, granular.decoders) as reader:
       assert reader.spec == spec
       assert reader.shards == shards
       assert reader.size == size
@@ -208,20 +199,18 @@ class TestGranular:
   def test_distributed_writer(self, tmpdir, shardlen, nworkers):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]'}
-    encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
-    decoders = {k: granular.decoders[v.strip('[]')] for k, v in spec.items()}
     datapoints = [{'bar': i, 'baz': ['hello'] * i} for i in range(10)]
     shards = 0
     size = 0
     for worker in range(nworkers):
       with granular.ShardedDatasetWriter(
-          directory, spec, encoders, shardlen,
+          directory, spec, granular.encoders, shardlen,
           shardstart=worker, shardstep=nworkers) as writer:
         for i in range(worker, 10, nworkers):
           writer.append(datapoints[i])
         shards += writer.shards
         size += writer.size
-    with granular.ShardedDatasetReader(directory, decoders) as reader:
+    with granular.ShardedDatasetReader(directory, granular.decoders) as reader:
       assert reader.shards == shards
       assert reader.size == size
       assert len(reader) == 10
@@ -234,14 +223,12 @@ class TestGranular:
   def test_distributed_roundtrip(self, tmpdir, shardlen, nworkers):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]'}
-    encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
-    decoders = {k: granular.decoders[v.strip('[]')] for k, v in spec.items()}
     datapoints = [{'bar': i, 'baz': ['hello'] * i} for i in range(10)]
     shards = 0
     size = 0
     for worker in range(nworkers):
       with granular.ShardedDatasetWriter(
-          directory, spec, encoders, shardlen,
+          directory, spec, granular.encoders, shardlen,
           shardstart=worker, shardstep=nworkers) as writer:
         for i in range(worker, 10, nworkers):
           writer.append(datapoints[i])
@@ -250,7 +237,7 @@ class TestGranular:
     received = []
     for worker in range(nworkers):
       with granular.ShardedDatasetReader(
-          directory, decoders,
+          directory, granular.decoders,
           shardstart=worker, shardstep=nworkers) as reader:
         received += [reader[i] for i in range(len(reader))]
     received = sorted(received, key=lambda x: x['bar'])
@@ -270,8 +257,6 @@ class TestGranular:
         'i': 'png',
         'j': 'mp4',
     }
-    encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
-    decoders = {k: granular.decoders[v.strip('[]')] for k, v in spec.items()}
     datapoints = []
     for i in range(10):
       datapoints.append({
@@ -286,11 +271,11 @@ class TestGranular:
           'i': np.zeros((80, 60, 4), np.uint8),
           'j': np.zeros((20, 80, 60, 3), np.uint8),
       })
-    with granular.DatasetWriter(directory, spec, encoders) as writer:
+    with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
       assert writer.spec == spec
       for datapoint in datapoints:
         writer.append(datapoint)
-    with granular.DatasetReader(directory, decoders) as reader:
+    with granular.DatasetReader(directory, granular.decoders) as reader:
       assert reader.spec == spec
       for i in range(len(reader)):
         actual = reader[i]

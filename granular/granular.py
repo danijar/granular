@@ -4,6 +4,7 @@ import json
 import operator
 import os
 import pathlib
+import re
 
 import msgpack
 
@@ -38,10 +39,6 @@ class ShardedDatasetWriter(Closing):
       directory.mkdir()
     except FileExistsError:
       pass
-    if encoders is None:
-      encoders = {k: None for k in spec.keys()}
-    assert set(encoders.keys()) == set(spec.keys()), (encoders.keys(), spec)
-    self.encoders = encoders
     self.directory = directory
     self.thespec = spec
     self.encoders = encoders
@@ -149,6 +146,8 @@ class DatasetWriter(Closing):
 
   def __init__(self, directory, spec, encoders=None):
     super().__init__()
+    assert all(re.match(r'^[a-z_]', k) for k in spec.keys()), spec
+    assert all(re.match(r'^[a-z_](\[\])?', v) for v in spec.values()), spec
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     assert not directory.exists(), directory
@@ -156,7 +155,8 @@ class DatasetWriter(Closing):
     spec = dict(sorted(spec.items(), key=lambda x: x[0]))
     if encoders is None:
       encoders = {k: None for k in spec.keys()}
-    assert set(encoders.keys()) == set(spec.keys()), (encoders.keys(), spec)
+    else:
+      encoders = {k: encoders[v.rstrip('[]')] for k, v in spec.items()}
     self.directory = directory
     self.encoders = encoders
     self.thespec = spec
@@ -243,11 +243,6 @@ class DatasetReader(Closing):
       directory = pathlib.Path(directory)
     with (directory / 'spec.json').open('rb') as f:
       self.thespec = json.loads(f.read())
-    if decoders is None:
-      decoders = {k: None for k in self.spec.keys()}
-    assert set(decoders.keys()) == set(self.spec.keys()), (
-        sorted(decoders.keys()), sorted(self.spec.keys()))
-    self.decoders = decoders
     if cache_refs:
       fp = io.BytesIO((directory / 'refs.bag').read_bytes())
       self.refreader = BagReader(fp, cache_index)
@@ -256,6 +251,11 @@ class DatasetReader(Closing):
     self.readers = {
         k: BagReader(directory / f'{k}.bag', cache_index)
         for k in self.spec.keys()}
+    if decoders is None:
+      decoders = {k: None for k in self.spec.keys()}
+    else:
+      decoders = {k: decoders[v.rstrip('[]')] for k, v in self.spec.items()}
+    self.decoders = decoders
 
   @property
   def spec(self):

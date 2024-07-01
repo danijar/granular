@@ -42,10 +42,11 @@ spec = {
     'baz': 'msgpack',  # packed structure
 }
 
+# Or use the provided granular.encoders.
 encoders = {
-    'foo': lambda x: x.to_bytes(8, 'little'),
-    'bar': lambda x: x.encode('utf-8'),
-    'baz': msgpack.packb,
+    'int': lambda x: x.to_bytes(8, 'little'),
+    'utf8': lambda x: x.encode('utf-8'),
+    'msgpack': msgpack.packb,
 }
 
 with granular.ShardedDatasetWriter(
@@ -77,10 +78,11 @@ $ tree directory
 Reading
 
 ```python
+# Or use the provided granular.decoders.
 decoders = {
-    'foo': lambda x: int.from_bytes(x),
-    'bar': lambda x: x.decode('utf-8'),
-    'baz': msgpack.unpackb,
+    'int': lambda x: int.from_bytes(x),
+    'utf8': lambda x: x.decode('utf-8'),
+    'msgpack': msgpack.unpackb,
 }
 
 with granular.ShardedDatasetReader(directory, decoders) as reader:
@@ -114,19 +116,12 @@ worker index and `shardstop` to the total number of workers.
 ## Formats
 
 Granular does not impose a serialization solution on the user. Any words can be
-used as types, as long as encoder and decoder functions are provided.
+used as types, as long as their encoder and decoder functions are provided.
 
 Examples of common encode and decode functions are provided in
 [formats.py][formats]. These support Numpy arrays, JPG and PNG images, MP4
-videos, and more.
-
-You can also use the provided functions for all keys like this:
-
-```python
-spec = {'foo': 'int', 'bar': 'utf8[]', 'baz': 'msgpack'}
-encoders = {k: granular.encoders[v.strip('[]')] for k, v in spec.items()}
-decoders = {k: granular.decoders[v.strip('[]')] for k, v in spec.items()}
-```
+videos, and more. They can be used as `granular.encoders` and
+`granular.decoders`.
 
 [formats]: https://github.com/danijar/granular/blob/main/granular/formats.py
 
