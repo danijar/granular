@@ -26,7 +26,7 @@ class Closing:
 class ShardedDatasetWriter(Closing):
 
   def __init__(
-      self, directory, spec, encoders=None,
+      self, directory, spec, encoders,
       shardlen=None, shardstart=0, shardstep=1):
     super().__init__()
     assert 0 <= shardstart
@@ -98,7 +98,7 @@ class ShardedDatasetWriter(Closing):
 class ShardedDatasetReader(Closing):
 
   def __init__(
-      self, directory, decoders=None, cache_index=True, cache_refs=False,
+      self, directory, decoders, cache_index=True, cache_refs=False,
       shardstart=0, shardstep=1):
     super().__init__()
     if isinstance(directory, str):
@@ -144,7 +144,7 @@ class ShardedDatasetReader(Closing):
 
 class DatasetWriter(Closing):
 
-  def __init__(self, directory, spec, encoders=None):
+  def __init__(self, directory, spec, encoders):
     super().__init__()
     assert all(re.match(r'^[a-z_]', k) for k in spec.keys()), spec
     assert all(re.match(r'^[a-z_](\[\])?', v) for v in spec.values()), spec
@@ -237,7 +237,7 @@ class DatasetWriter(Closing):
 class DatasetReader(Closing):
 
   def __init__(
-      self, directory, decoders=None, cache_index=True, cache_refs=False):
+      self, directory, decoders, cache_index=True, cache_refs=False):
     super().__init__()
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
@@ -444,7 +444,7 @@ class BagReader(Closing):
 
   def __getitem__(self, index):
     assert not self.closed
-    assert isinstance(index, (int, slice, range)), index
+    assert isinstance(index, (int, slice, range)), (index, type(index))
     if isinstance(index, int):
       start = self._get_start(index)
       if index + 1 < self.length:
