@@ -17,16 +17,40 @@ def decode_int(buffer, size=None, endian='little'):
 
 def encode_array(value):
   assert value.data.c_contiguous
-  header = msgpack.packb((value.dtype.str, value.shape))
-  hsize = len(header).to_bytes(4, 'little')
-  return hsize + header + value.data
+  return msgpack.packb((value.dtype.str, value.shape, value.data))
 
 
 def decode_array(buffer):
   import numpy as np
-  hsize = int.from_bytes(buffer[:4], 'little')
-  dtype, shape = msgpack.unpackb(buffer[4: 4 + hsize])
-  return np.frombuffer(buffer[4 + hsize:], dtype).reshape(shape)
+  dtype, shape, data = msgpack.unpackb(buffer)
+  return np.frombuffer(data, dtype).reshape(shape)
+
+
+def encode_arraytree(value):
+  def fn(xs):
+    if isinstance(xs, (list, tuple)):
+      return [fn(x) for x in xs]
+    elif isinstance(xs, dict):
+      return {k: fn(v) for k, v in xs.items()}
+    else:
+      assert xs.data.c_contiguous
+      return ('_', xs.dtype.str, xs.shape, xs.data)
+  return msgpack.packb(fn(value))
+
+
+def decode_arraytree(buffer):
+  import numpy as np
+  def fn(xs):
+    if isinstance(xs, list) and len(xs) == 4 and xs[0] == '_':
+      _, dtype, shape, data = xs
+      return np.frombuffer(data, dtype).reshape(shape)
+    elif isinstance(xs, (list, tuple)):
+      return [fn(x) for x in xs]
+    elif isinstance(xs, dict):
+      return {k: fn(v) for k, v in xs.items()}
+    else:
+      assert False, xs
+  return fn(msgpack.unpackb(buffer))
 
 
 def encode_image(value, quality=100, format='jpg'):
@@ -80,6 +104,7 @@ encoders = {
     'msgpack': msgpack.packb,
     'int': encode_int,
     'array': encode_array,
+    'arraytree': encode_arraytree,
     'jpg': bind(encode_image, format='jpg'),
     'png': bind(encode_image, format='png'),
     'mp4': encode_mp4,
@@ -92,6 +117,7 @@ decoders = {
     'msgpack': msgpack.unpackb,
     'int': decode_int,
     'array': decode_array,
+    'arraytree': decode_arraytree,
     'jpg': decode_image,
     'png': decode_image,
     'mp4': decode_mp4,
