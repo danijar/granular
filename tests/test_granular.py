@@ -8,6 +8,7 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
+import cloudpickle
 import granular
 
 
@@ -72,29 +73,6 @@ class TestGranular:
         values = [int.from_bytes(x, 'little') for x in values]
         expected = [x for x in list(requested) if 0 <= x < 100]
         assert values == expected
-
-  @pytest.mark.parametrize('cache_index', (True, False))
-  def test_pickle_reader(self, tmpdir, cache_index):
-    filename = pathlib.Path(tmpdir) / 'file.bag'
-    rng = np.random.default_rng(seed=0)
-    values = []
-    total = 0
-    with granular.BagWriter(filename) as writer:
-      for i in range(100):
-        size = int(rng.integers(4, 100))
-        value = int(rng.integers(0, 1000))
-        writer.append(value.to_bytes(size, 'little'))
-        values.append(value)
-        total += size
-    reader = granular.BagReader(filename, cache_index)
-    reader = pickle.loads(pickle.dumps(reader))
-    reader = pickle.loads(pickle.dumps(reader))
-    with reader:
-      assert len(reader) == 100
-      for index, reference in enumerate(values):
-        value = reader[index]
-        value = int.from_bytes(value, 'little')
-        assert value == reference
 
   def test_dataset_writer(self, tmpdir):
     directory = pathlib.Path(tmpdir) / 'dataset'
@@ -266,6 +244,55 @@ class TestGranular:
         received += [reader[i] for i in range(len(reader))]
     received = sorted(received, key=lambda x: x['bar'])
     assert datapoints == received
+
+  @pytest.mark.parametrize('cache_index', (True, False))
+  def test_pickle_single_reader(self, tmpdir, cache_index):
+    filename = pathlib.Path(tmpdir) / 'file.bag'
+    rng = np.random.default_rng(seed=0)
+    values = []
+    total = 0
+    with granular.BagWriter(filename) as writer:
+      for i in range(100):
+        size = int(rng.integers(4, 100))
+        value = int(rng.integers(0, 1000))
+        writer.append(value.to_bytes(size, 'little'))
+        values.append(value)
+        total += size
+    reader = granular.BagReader(filename, cache_index)
+    with reader:
+      [reader[i] for i in range(100)]
+    reader = pickle.loads(pickle.dumps(reader))
+    reader = pickle.loads(pickle.dumps(reader))
+    with reader:
+      assert len(reader) == 100
+      for index, reference in enumerate(values):
+        value = reader[index]
+        value = int.from_bytes(value, 'little')
+        assert value == reference
+
+  @pytest.mark.parametrize('cache_index', (True, False))
+  @pytest.mark.parametrize('cache_refs', (True, False))
+  def test_pickle_dataset_reader(self, tmpdir, cache_index, cache_refs):
+    directory = pathlib.Path(tmpdir) / 'dataset'
+    spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
+    datapoints = []
+    with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
+      for i in range(10):
+        baz = [f'word{j}' for j in range(i)]
+        datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+        writer.append(datapoint)
+        datapoints.append(datapoint)
+      size = writer.size
+    reader = granular.DatasetReader(
+        directory, granular.decoders, cache_index, cache_refs)
+    reader = cloudpickle.loads(cloudpickle.dumps(reader))
+    reader = cloudpickle.loads(cloudpickle.dumps(reader))
+    with reader:
+      assert len(reader) == 10
+      assert reader.size == size
+      for i in range(10):
+        datapoint = reader[i]
+        assert datapoint == datapoints[i]
 
   def test_encoders_decoders(self, tmpdir):
     directory = pathlib.Path(tmpdir) / 'dataset'

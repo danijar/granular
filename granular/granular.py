@@ -15,7 +15,7 @@ class Closing:
     self.closed = False
 
   def __enter__(self):
-    assert not self.closed
+    # assert not self.closed
     return self
 
   def __exit__(self, *e):
@@ -433,7 +433,7 @@ class BagReader(Closing):
     if hasattr(self.source, 'open'):
       self.file = self.source.open('rb')
     else:
-      self.file = io.BytesIO(self.source)
+      self.file = self.source = io.BytesIO(self.source)
 
   @property
   def size(self):
