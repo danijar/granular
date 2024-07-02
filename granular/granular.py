@@ -269,7 +269,8 @@ class DatasetReader(Closing):
     with (directory / 'spec.json').open('rb') as f:
       self.thespec = json.loads(f.read())
     if cache_refs:
-      source = (directory / 'refs.bag').read_bytes()
+      with (directory / 'refs.bag').open('rb') as f:
+        source = f.read()
       self.refreader = BagReader(source, cache_index)
     else:
       self.refreader = BagReader(directory / 'refs.bag', cache_index)
