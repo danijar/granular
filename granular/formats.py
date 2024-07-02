@@ -26,19 +26,22 @@ def decode_array(buffer):
   return np.frombuffer(data, dtype).reshape(shape)
 
 
-def encode_arraytree(value):
+def encode_tree(value):
+  import numpy as np
   def fn(xs):
     if isinstance(xs, (list, tuple)):
       return [fn(x) for x in xs]
     elif isinstance(xs, dict):
       return {k: fn(v) for k, v in xs.items()}
-    else:
+    elif isinstance(xs, np.ndarray):
       assert xs.data.c_contiguous
       return ('_', xs.dtype.str, xs.shape, xs.data)
+    else:
+      return xs
   return msgpack.packb(fn(value))
 
 
-def decode_arraytree(buffer):
+def decode_tree(buffer):
   import numpy as np
   def fn(xs):
     if isinstance(xs, list) and len(xs) == 4 and xs[0] == '_':
@@ -49,7 +52,7 @@ def decode_arraytree(buffer):
     elif isinstance(xs, dict):
       return {k: fn(v) for k, v in xs.items()}
     else:
-      assert False, xs
+      return xs
   return fn(msgpack.unpackb(buffer))
 
 
@@ -104,7 +107,7 @@ encoders = {
     'msgpack': msgpack.packb,
     'int': encode_int,
     'array': encode_array,
-    'arraytree': encode_arraytree,
+    'tree': encode_tree,
     'jpg': bind(encode_image, format='jpg'),
     'png': bind(encode_image, format='png'),
     'mp4': encode_mp4,
@@ -117,7 +120,7 @@ decoders = {
     'msgpack': msgpack.unpackb,
     'int': decode_int,
     'array': decode_array,
-    'arraytree': decode_arraytree,
+    'tree': decode_tree,
     'jpg': decode_image,
     'png': decode_image,
     'mp4': decode_mp4,
