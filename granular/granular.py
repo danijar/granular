@@ -27,22 +27,35 @@ class Closing:
 
 class SharedBuffer:
 
+  ENABLE = True
+
   def __init__(self, content):
-    self.sm = shared_memory.SharedMemory(create=True, size=len(content))
-    self.sm.buf[:] = memoryview(content)
+    if self.ENABLE:
+      self.sm = shared_memory.SharedMemory(create=True, size=len(content))
+      self.sm.buf[:] = memoryview(content)
+      self.buf = self.sm.buf
+    else:
+      self.buf = bytes(content)
 
   def __getitem__(self, index):
-    return self.sm.buf[index]
+    return self.buf[index]
 
   def __getstate__(self):
-    return self.sm.name
+    if self.ENABLE:
+      return self.sm.name
+    else:
+      return self.buf
 
-  def __setstate__(self, name):
-    self.sm = shared_memory.SharedMemory(name=name)
+  def __setstate__(self, value):
+    if self.ENABLE:
+      self.sm = shared_memory.SharedMemory(name=value)
+      self.buf = self.sm.buf
+    else:
+      self.buf = value
 
   def open(self, mode='rb'):
     assert mode in ('rb', 'wb'), mode
-    return io.BytesIO(self.sm.buf)
+    return io.BytesIO(self.buf)
 
 
 class ShardedDatasetWriter(Closing):
