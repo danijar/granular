@@ -244,8 +244,8 @@ class DatasetReader(Closing):
     with (directory / 'spec.json').open('rb') as f:
       self.thespec = json.loads(f.read())
     if cache_refs:
-      fp = io.BytesIO((directory / 'refs.bag').read_bytes())
-      self.refreader = BagReader(fp, cache_index)
+      file = io.BytesIO((directory / 'refs.bag').read_bytes())
+      self.refreader = BagReader(file, cache_index)
     else:
       self.refreader = BagReader(directory / 'refs.bag', cache_index)
     self.readers = {
@@ -338,16 +338,15 @@ class DatasetReader(Closing):
 
 class BagWriter(Closing):
 
-  def __init__(self, fp):
+  def __init__(self, filepath):
     super().__init__()
-    if isinstance(fp, str):
-      fp = pathlib.Path(fp)
-    if hasattr(fp, '__fspath__'):
-      assert not fp.exists(), fp
-      fp = fp.open('wb')
-    assert isinstance(fp, io.BufferedIOBase), type(fp)
-    assert fp.writable(), fp
-    self.fp = fp
+    if isinstance(filepath, str):
+      filepath = pathlib.Path(filepath)
+    assert not filepath.exists(), filepath
+    file = filepath.open('wb')
+    assert isinstance(file, io.BufferedIOBase), type(file)
+    assert file.writable(), file
+    self.file = file
     self.offset = 0
     self.length = 0
     self.limits = []
@@ -376,9 +375,9 @@ class BagWriter(Closing):
     if not self.towrite:
       return
     if len(self.towrite) == 1:
-      self.fp.write(self.towrite[0])
+      self.file.write(self.towrite[0])
     else:
-      self.fp.write(b''.join(self.towrite))
+      self.file.write(b''.join(self.towrite))
     self.towrite.clear()
 
   def close(self):
@@ -386,29 +385,55 @@ class BagWriter(Closing):
     self.limits.append(self.offset)
     self.towrite.extend(tuple(x.to_bytes(8, 'little') for x in self.limits))
     self.flush()
-    self.fp.close()
+    self.file.close()
 
 
 class BagReader(Closing):
 
-  def __init__(self, fp, cache_index=True):
+  def __init__(self, file, cache_index=True):
     super().__init__()
-    if isinstance(fp, str):
-      fp = pathlib.Path(fp)
-    if hasattr(fp, '__fspath__'):
-      fp = fp.open('rb')
-    assert isinstance(fp, io.BufferedIOBase), type(fp)
-    assert fp.readable(), fp
-    fp.seek(-8, os.SEEK_END)
-    self.filesize = fp.tell() + 8
-    self.recordend = int.from_bytes(fp.read(8), 'little')
+    if isinstance(file, str):
+      file = pathlib.Path(file)
+    assert hasattr(file, 'open') or isinstance(file, io.BytesIO), file
+    self.source = file
+    if hasattr(file, 'open'):
+      file = file.open('rb')
+    assert isinstance(file, io.BufferedIOBase), type(file)
+    assert file.readable(), file
+    file.seek(-8, os.SEEK_END)
+    self.filesize = file.tell() + 8
+    self.recordend = int.from_bytes(file.read(8), 'little')
     self.length = (self.filesize - 8 - self.recordend) // 8
     if cache_index:
-      fp.seek(self.recordend, os.SEEK_SET)
-      self.limits = fp.read(8 * self.length + 8)
+      file.seek(self.recordend, os.SEEK_SET)
+      self.limits = file.read(8 * self.length + 8)
     else:
       self.limits = None
-    self.fp = fp
+    self.file = file
+
+  def __getstate__(self):
+    source = self.source
+    if not hasattr(self.source, 'open'):
+      source = self.source.getvalue()
+    return {
+        'source': source,
+        'filesize': self.filesize,
+        'recordend': self.recordend,
+        'length': self.length,
+        'limits': self.limits,
+    }
+
+  def __setstate__(self, d):
+    self.source = d['source']
+    self.filesize = d['filesize']
+    self.recordend = d['recordend']
+    self.length = d['length']
+    self.limits = d['limits']
+    self.closed = False
+    if hasattr(self.source, 'open'):
+      self.file = self.source.open('rb')
+    else:
+      self.file = io.BytesIO(self.source)
 
   @property
   def size(self):
@@ -426,8 +451,8 @@ class BagReader(Closing):
         end = self._get_start(index + 1)
       else:
         end = self.recordend
-      self.fp.seek(start, os.SEEK_SET)
-      return self.fp.read(end - start)
+      self.file.seek(start, os.SEEK_SET)
+      return self.file.read(end - start)
     else:
       assert index.start >= 0 and index.stop >= 0 and index.step == 1, index
       index = range(index.start, min(index.stop, self.length))
@@ -435,8 +460,8 @@ class BagReader(Closing):
         return []
       limits = self._get_limits(index.start, index.stop + 1)
       start, stop = limits[0], limits[-1]
-      self.fp.seek(start, os.SEEK_SET)
-      buffer = self.fp.read(stop - start)
+      self.file.seek(start, os.SEEK_SET)
+      buffer = self.file.read(stop - start)
       records = [
           buffer[i - start: j - start]
           for i, j in zip(limits[:-1], limits[1:])]
@@ -444,14 +469,14 @@ class BagReader(Closing):
 
   def close(self):
     assert not self.closed
-    self.fp.close()
+    self.file.close()
 
   def _get_start(self, index):
     if self.limits:
       return int.from_bytes(self.limits[8 * index: 8 * (index + 1)], 'little')
     else:
-      self.fp.seek(-8 * (self.length - index) - 8, os.SEEK_END)
-      offset = self.fp.read(8)
+      self.file.seek(-8 * (self.length - index) - 8, os.SEEK_END)
+      offset = self.file.read(8)
       offset = int.from_bytes(offset, 'little')
       return offset
 
@@ -461,8 +486,8 @@ class BagReader(Closing):
           int.from_bytes(self.limits[8 * i: 8 * (i + 1)], 'little')
           for i in range(start, stop)]
     else:
-      self.fp.seek(-8 * (self.length - start) - 8, os.SEEK_END)
-      limits = self.fp.read(8 * (stop - start))
+      self.file.seek(-8 * (self.length - start) - 8, os.SEEK_END)
+      limits = self.file.read(8 * (stop - start))
       limits = [
           int.from_bytes(limits[8 * i: 8 * (i + 1)], 'little')
           for i in range(stop - start)]

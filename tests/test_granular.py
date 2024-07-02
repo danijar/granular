@@ -1,5 +1,6 @@
 import json
 import pathlib
+import pickle
 import sys
 
 import numpy as np
@@ -71,6 +72,29 @@ class TestGranular:
         values = [int.from_bytes(x, 'little') for x in values]
         expected = [x for x in list(requested) if 0 <= x < 100]
         assert values == expected
+
+  @pytest.mark.parametrize('cache_index', (True, False))
+  def test_pickle_reader(self, tmpdir, cache_index):
+    filename = pathlib.Path(tmpdir) / 'file.bag'
+    rng = np.random.default_rng(seed=0)
+    values = []
+    total = 0
+    with granular.BagWriter(filename) as writer:
+      for i in range(100):
+        size = int(rng.integers(4, 100))
+        value = int(rng.integers(0, 1000))
+        writer.append(value.to_bytes(size, 'little'))
+        values.append(value)
+        total += size
+    reader = granular.BagReader(filename, cache_index)
+    reader = pickle.loads(pickle.dumps(reader))
+    reader = pickle.loads(pickle.dumps(reader))
+    with reader:
+      assert len(reader) == 100
+      for index, reference in enumerate(values):
+        value = reader[index]
+        value = int.from_bytes(value, 'little')
+        assert value == reference
 
   def test_dataset_writer(self, tmpdir):
     directory = pathlib.Path(tmpdir) / 'dataset'
