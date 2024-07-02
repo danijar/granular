@@ -4,7 +4,9 @@ import json
 import operator
 import os
 import pathlib
+import pickle
 import re
+from multiprocessing import shared_memory
 
 import msgpack
 
@@ -21,6 +23,26 @@ class Closing:
   def __exit__(self, *e):
     self.close()
     self.closed = True
+
+
+class SharedBuffer:
+
+  def __init__(self, content):
+    self.sm = shared_memory.SharedMemory(create=True, size=len(content))
+    self.sm.buf[:] = memoryview(content)
+
+  def __getitem__(self, index):
+    return self.sm.buf[index]
+
+  def __getstate__(self):
+    return self.sm.name
+
+  def __setstate__(self, name):
+    self.sm = shared_memory.SharedMemory(name=name)
+
+  def open(self, mode='rb'):
+    assert mode in ('rb', 'wb'), mode
+    return io.BytesIO(self.sm.buf)
 
 
 class ShardedDatasetWriter(Closing):
@@ -137,6 +159,9 @@ class ShardedDatasetReader(Closing):
       if start <= index < stop:
         return reader[index - start]
 
+  def copy(self):
+    return pickle.loads(pickle.dumps(self))
+
   def close(self):
     for reader in self.readers:
       reader.close()
@@ -244,8 +269,8 @@ class DatasetReader(Closing):
     with (directory / 'spec.json').open('rb') as f:
       self.thespec = json.loads(f.read())
     if cache_refs:
-      file = io.BytesIO((directory / 'refs.bag').read_bytes())
-      self.refreader = BagReader(file, cache_index)
+      source = (directory / 'refs.bag').read_bytes()
+      self.refreader = BagReader(source, cache_index)
     else:
       self.refreader = BagReader(directory / 'refs.bag', cache_index)
     self.readers = {
@@ -278,6 +303,7 @@ class DatasetReader(Closing):
     refs = self.refreader[index]
     refs = msgpack.unpackb(refs)
     datapoint = {}
+    # TODO: In the future, we should fetch all keys concurrently.
     for i, (key, dtype) in enumerate(self.spec.items()):
       msk = mask.get(key, False)
       reader = self.readers[key]
@@ -319,6 +345,9 @@ class DatasetReader(Closing):
         value = self._decode(key, value, dtype)
         datapoint[key] = value
     return datapoint
+
+  def copy(self):
+    return pickle.loads(pickle.dumps(self))
 
   def close(self):
     self.refreader.close()
@@ -390,15 +419,14 @@ class BagWriter(Closing):
 
 class BagReader(Closing):
 
-  def __init__(self, file, cache_index=True):
+  def __init__(self, source, cache_index=True):
     super().__init__()
-    if isinstance(file, str):
-      file = pathlib.Path(file)
-    assert hasattr(file, 'open') or isinstance(file, io.BytesIO), file
-    self.source = file
-    if hasattr(file, 'open'):
-      file = file.open('rb')
-    assert isinstance(file, io.BufferedIOBase), type(file)
+    if isinstance(source, str):
+      source = pathlib.Path(source)
+    if not hasattr(source, 'open'):
+      cache_index = False
+      source = SharedBuffer(source)
+    file = source.open('rb')
     assert file.readable(), file
     file.seek(-8, os.SEEK_END)
     self.filesize = file.tell() + 8
@@ -406,17 +434,16 @@ class BagReader(Closing):
     self.length = (self.filesize - 8 - self.recordend) // 8
     if cache_index:
       file.seek(self.recordend, os.SEEK_SET)
-      self.limits = file.read(8 * self.length + 8)
+      limits = file.read(8 * self.length + 8)
+      self.limits = SharedBuffer(limits)
     else:
       self.limits = None
+    self.source = source
     self.file = file
 
   def __getstate__(self):
-    source = self.source
-    if not hasattr(self.source, 'open'):
-      source = self.source.getvalue()
     return {
-        'source': source,
+        'source': self.source,
         'filesize': self.filesize,
         'recordend': self.recordend,
         'length': self.length,
@@ -430,10 +457,7 @@ class BagReader(Closing):
     self.length = d['length']
     self.limits = d['limits']
     self.closed = False
-    if hasattr(self.source, 'open'):
-      self.file = self.source.open('rb')
-    else:
-      self.file = self.source = io.BytesIO(self.source)
+    self.file = self.source.open('rb')
 
   @property
   def size(self):
@@ -466,6 +490,9 @@ class BagReader(Closing):
           buffer[i - start: j - start]
           for i, j in zip(limits[:-1], limits[1:])]
       return records
+
+  def copy(self):
+    return pickle.loads(pickle.dumps(self))
 
   def close(self):
     assert not self.closed
