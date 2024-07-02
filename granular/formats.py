@@ -12,6 +12,7 @@ def encode_int(value, size=None, endian='little'):
 
 
 def decode_int(buffer, size=None, endian='little'):
+  assert len(buffer) <= 16, len(buffer)
   return int.from_bytes(buffer, endian)
 
 
