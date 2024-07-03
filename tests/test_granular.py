@@ -246,6 +246,49 @@ class TestGranular:
     assert datapoints == received
 
   @pytest.mark.parametrize('cache_index', (True, False))
+  @pytest.mark.parametrize('cache_refs', (True, False))
+  def test_dataset_masks(self, tmpdir, cache_index, cache_refs):
+    directory = pathlib.Path(tmpdir) / 'dataset'
+    spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
+    datapoints = []
+    with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
+      for i in range(10):
+        baz = [str(j) for j in range(i)]
+        datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+        writer.append(datapoint)
+        datapoints.append(datapoint)
+    reader = granular.DatasetReader(
+        directory, granular.decoders, cache_index, cache_refs)
+    reader = cloudpickle.loads(cloudpickle.dumps(reader))
+    reader = cloudpickle.loads(cloudpickle.dumps(reader))
+    with reader:
+      for i in range(10):
+        mask = reader.mask(i)
+        assert mask == {'bar': True, 'baz': range(i), 'foo': True}
+        datapoint = reader[i, mask]
+        assert datapoint == datapoints[i]
+
+  @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
+  def test_sharded_masks(self, tmpdir, shardlen):
+    directory = pathlib.Path(tmpdir) / 'dataset'
+    spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
+    datapoints = []
+    with granular.ShardedDatasetWriter(
+        directory, spec, granular.encoders, shardlen) as writer:
+      assert writer.spec == spec
+      for i in range(10):
+        baz = [f'word{j}' for j in range(i)]
+        datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+        writer.append(datapoint)
+        datapoints.append(datapoint)
+    with granular.ShardedDatasetReader(directory, granular.decoders) as reader:
+      for i in range(10):
+        mask = reader.mask(i)
+        assert mask == {'bar': True, 'baz': range(i), 'foo': True}
+        datapoint = reader[i, mask]
+        assert datapoint == datapoints[i]
+
+  @pytest.mark.parametrize('cache_index', (True, False))
   def test_pickle_single_reader(self, tmpdir, cache_index):
     filename = pathlib.Path(tmpdir) / 'file.bag'
     rng = np.random.default_rng(seed=0)

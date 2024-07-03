@@ -1,3 +1,4 @@
+import functools
 import io
 import itertools
 import json
@@ -162,15 +163,21 @@ class ShardedDatasetReader(Closing):
   def shards(self):
     return len(self.readers)
 
+  def mask(self, index):
+    reader, local_index = self._resolve(index)
+    return reader.mask(local_index)
+
   def __len__(self):
     return self.length
 
   def __getitem__(self, index):
-    if not (0 <= index <= self.length):
-      raise IndexError(index)
-    for reader, start, stop in zip(self.readers, self.starts, self.stops):
-      if start <= index < stop:
-        return reader[index - start]
+    if isinstance(index, tuple):
+      index, mask = index
+      reader, local_index = self._resolve(index)
+      return reader[local_index, mask]
+    else:
+      reader, local_index = self._resolve(index)
+      return reader[local_index]
 
   def copy(self):
     return pickle.loads(pickle.dumps(self))
@@ -178,6 +185,14 @@ class ShardedDatasetReader(Closing):
   def close(self):
     for reader in self.readers:
       reader.close()
+
+  def _resolve(self, index):
+    if not (0 <= index <= self.length):
+      raise IndexError(index)
+    for reader, start, stop in zip(self.readers, self.starts, self.stops):
+      if start <= index < stop:
+        local_index = index - start
+        return reader, local_index
 
 
 class DatasetWriter(Closing):
@@ -304,6 +319,11 @@ class DatasetReader(Closing):
   def size(self):
     return sum(x.size for x in self.readers.values()) + self.refreader.size
 
+  def mask(self, index):
+    return {
+        key: range(0, ref[1] if ref else 0) if dtype.endswith('[]') else True
+        for ref, (key, dtype) in zip(self._getref(index), self.spec.items())}
+
   def __len__(self):
     return len(self.refreader)
 
@@ -314,51 +334,41 @@ class DatasetReader(Closing):
     else:
       mask = {k: True for k in self.spec.keys()}
     assert all(k in self.spec for k in mask), (self.spec, mask)
-    refs = self.refreader[index]
-    refs = msgpack.unpackb(refs)
-    datapoint = {}
-    # TODO: In the future, we should fetch all keys concurrently.
+    ref = self._getref(index)
+    requests = {}
     for i, (key, dtype) in enumerate(self.spec.items()):
       msk = mask.get(key, False)
-      reader = self.readers[key]
       if dtype.endswith('[]'):
-        if not msk:
+        if msk is False:
           continue
-        # Construct available range.
-        if refs[i]:
-          start, length = refs[i]
+        if ref[i]:
+          start, length = ref[i]
           avail = range(start, start + length)
         else:
           avail = range(0)
-        # Select requested range.
         if isinstance(msk, bool):
-          requested = avail
+          assert msk is True
+          requests[key] = avail
         elif isinstance(msk, (slice, range)):
           assert msk.start >= 0 and msk.stop >= 0 and msk.step == 1, msk
-          requested = range(
-              avail.start + msk.start,
-              min(avail.start + msk.stop, avail.stop))
+          start = avail.start + msk.start
+          stop = min(avail.start + msk.stop, avail.stop)
+          requests[key] = range(start, stop)
         else:
           raise TypeError((msk, type(msk)))
-        # Request range if needed.
-        if requested:
-          assert isinstance(requested, range)
-          values = reader[requested]
-          values = [self._decode(key, x, dtype) for x in values]
-          datapoint[key] = values
-        else:
-          datapoint[key] = []
+
       else:
         if not isinstance(msk, bool):
           raise TypeError((key, mask))
         if not msk:
           continue
-        idx = refs[i]
-        assert isinstance(idx, int)
-        value = reader[idx]
-        value = self._decode(key, value, dtype)
-        datapoint[key] = value
-    return datapoint
+        requests[key] = ref[i]
+    # TODO: Fetch modalities concurrently.
+    datapoint = {k: self.readers[k][r] for k, r in requests.items()}
+    decoded = {
+        k: self._decode(k, v, self.spec[k])
+        for k, v in datapoint.items()}
+    return decoded
 
   def copy(self):
     return pickle.loads(pickle.dumps(self))
@@ -368,12 +378,27 @@ class DatasetReader(Closing):
     for reader in self.readers.values():
       reader.close()
 
+  @functools.lru_cache(maxsize=1)
+  def _getref(self, index):
+    ref = self.refreader[index]
+    ref = msgpack.unpackb(ref)
+    assert len(ref) == len(self.spec)
+    for (key, dtype), r in zip(self.spec.items(), ref):
+      if dtype.endswith('[]'):
+        assert isinstance(r, list) and len(r) in (0, 2)
+      else:
+        assert isinstance(r, int)
+    return ref
+
   def _decode(self, key, value, dtype):
     decoder = self.decoders[key]
     if not decoder:
       return value
     try:
-      return decoder(value)
+      if isinstance(value, list):
+        return [decoder(x) for x in value]
+      else:
+        return decoder(value)
     except Exception:
       print(f"Error decoding key '{key}' of type '{dtype}'.")
       raise
