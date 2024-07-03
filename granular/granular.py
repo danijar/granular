@@ -136,7 +136,7 @@ class ShardedDatasetReader(Closing):
 
   def __init__(
       self, directory, decoders, cache_index=True, cache_refs=False,
-      shardstart=0, shardstep=1):
+      parallel=False, shardstart=0, shardstep=1):
     super().__init__()
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
@@ -145,8 +145,15 @@ class ShardedDatasetReader(Closing):
     selected = [
         folders[i] for i in range(shardstart, len(folders), shardstep)]
     assert selected, (folders, selected, shardstart, shardstep)
-    self.readers = [
-        DatasetReader(x, decoders, cache_index, cache_refs) for x in selected]
+    if parallel:
+      make = lambda x: DatasetReader(
+          x, decoders, cache_index, cache_refs, parallel)
+      with concurrent.futures.ThreadPoolExecutor(len(selected)) as pool:
+        self.readers = list(pool.map(make, selected))
+    else:
+      self.readers = [
+          DatasetReader(x, decoders, cache_index, cache_refs, parallel)
+          for x in selected]
     lengths = [len(x) for x in self.readers]
     self.stops = list(itertools.accumulate(lengths, operator.add))
     self.starts = [0] + self.stops[:-1]

@@ -194,7 +194,7 @@ class TestGranular:
       shards = writer.shards
       size = writer.size
     with granular.ShardedDatasetReader(
-        directory, granular.decoders, parallel) as reader:
+        directory, granular.decoders, parallel=parallel) as reader:
       assert reader.spec == spec
       assert reader.shards == shards
       assert reader.size == size
