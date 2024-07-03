@@ -42,7 +42,7 @@ spec = {
     'baz': 'msgpack',  # packed structure
 }
 
-# Or use the provided granular.encoders.
+# Or use the provided `granular.encoders`.
 encoders = {
     'int': lambda x: x.to_bytes(8, 'little'),
     'utf8': lambda x: x.encode('utf-8'),
@@ -78,7 +78,7 @@ $ tree directory
 Reading
 
 ```python
-# Or use the provided granular.decoders.
+# Or use the provided `granular.decoders`.
 decoders = {
     'int': lambda x: int.from_bytes(x),
     'utf8': lambda x: x.decode('utf-8'),
@@ -111,7 +111,7 @@ For small datasets where sharding is not necessary, you can also use
 
 For distributed processing using multiple processes or machines, use
 `ShardedDatasetReader` and `ShardedDatasetWriter` and set `shardstart` to the
-worker index and `shardstop` to the total number of workers.
+worker index and `shardstep` to the total number of workers.
 
 ## Formats
 
