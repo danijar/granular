@@ -94,7 +94,8 @@ class TestGranular:
 
   @pytest.mark.parametrize('cache_index', (True, False))
   @pytest.mark.parametrize('cache_refs', (True, False))
-  def test_dataset_roundtrip(self, tmpdir, cache_index, cache_refs):
+  @pytest.mark.parametrize('parallel', (True, False))
+  def test_dataset_roundtrip(self, tmpdir, cache_index, cache_refs, parallel):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
     datapoints = []
@@ -106,7 +107,8 @@ class TestGranular:
         datapoints.append(datapoint)
       size = writer.size
     with granular.DatasetReader(
-        directory, granular.decoders, cache_index, cache_refs) as reader:
+        directory, granular.decoders, cache_index, cache_refs,
+        parallel) as reader:
       assert len(reader) == 10
       assert reader.size == size
       for i in range(10):
@@ -115,7 +117,8 @@ class TestGranular:
 
   @pytest.mark.parametrize('cache_index', (True, False))
   @pytest.mark.parametrize('cache_refs', (True, False))
-  def test_dataset_slicing(self, tmpdir, cache_index, cache_refs):
+  @pytest.mark.parametrize('parallel', (True, False))
+  def test_dataset_slicing(self, tmpdir, cache_index, cache_refs, parallel):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'foo': 'utf8', 'bar': 'int', 'baz': 'utf8[]'}
     with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
@@ -124,7 +127,8 @@ class TestGranular:
         datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
         writer.append(datapoint)
     with granular.DatasetReader(
-        directory, granular.decoders, cache_index, cache_refs) as reader:
+        directory, granular.decoders, cache_index, cache_refs,
+        parallel) as reader:
       assert reader[3, {}] == {}
       assert reader[3, {'foo': True}] == {'foo': 'hello world'}
       with pytest.raises(TypeError):
@@ -174,7 +178,8 @@ class TestGranular:
         assert writer.shards == 1
 
   @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
-  def test_sharded_roundtrip(self, tmpdir, shardlen):
+  @pytest.mark.parametrize('parallel', (True, False))
+  def test_sharded_roundtrip(self, tmpdir, shardlen, parallel):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
     datapoints = []
@@ -188,7 +193,8 @@ class TestGranular:
         datapoints.append(datapoint)
       shards = writer.shards
       size = writer.size
-    with granular.ShardedDatasetReader(directory, granular.decoders) as reader:
+    with granular.ShardedDatasetReader(
+        directory, granular.decoders, parallel) as reader:
       assert reader.spec == spec
       assert reader.shards == shards
       assert reader.size == size
@@ -259,8 +265,6 @@ class TestGranular:
         datapoints.append(datapoint)
     reader = granular.DatasetReader(
         directory, granular.decoders, cache_index, cache_refs)
-    reader = cloudpickle.loads(cloudpickle.dumps(reader))
-    reader = cloudpickle.loads(cloudpickle.dumps(reader))
     with reader:
       for i in range(10):
         mask = reader.mask(i)
@@ -315,7 +319,9 @@ class TestGranular:
 
   @pytest.mark.parametrize('cache_index', (True, False))
   @pytest.mark.parametrize('cache_refs', (True, False))
-  def test_pickle_dataset_reader(self, tmpdir, cache_index, cache_refs):
+  @pytest.mark.parametrize('parallel', (True, False))
+  def test_pickle_dataset_reader(
+      self, tmpdir, cache_index, cache_refs, parallel):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
     datapoints = []
@@ -327,7 +333,7 @@ class TestGranular:
         datapoints.append(datapoint)
       size = writer.size
     reader = granular.DatasetReader(
-        directory, granular.decoders, cache_index, cache_refs)
+        directory, granular.decoders, cache_index, cache_refs, parallel)
     reader = cloudpickle.loads(cloudpickle.dumps(reader))
     reader = cloudpickle.loads(cloudpickle.dumps(reader))
     with reader:

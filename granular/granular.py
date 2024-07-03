@@ -1,3 +1,4 @@
+import concurrent.futures
 import functools
 import io
 import itertools
@@ -290,7 +291,8 @@ class DatasetWriter(Closing):
 class DatasetReader(Closing):
 
   def __init__(
-      self, directory, decoders, cache_index=True, cache_refs=False):
+      self, directory, decoders,
+      cache_index=True, cache_refs=False, parallel=False):
     super().__init__()
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
@@ -310,6 +312,9 @@ class DatasetReader(Closing):
     else:
       decoders = {k: decoders[v.rstrip('[]')] for k, v in self.spec.items()}
     self.decoders = decoders
+    self.parallel = parallel
+    if parallel:
+      self.pool = self._make_pool()
 
   @property
   def spec(self):
@@ -323,6 +328,17 @@ class DatasetReader(Closing):
     return {
         key: range(0, ref[1] if ref else 0) if dtype.endswith('[]') else True
         for ref, (key, dtype) in zip(self._getref(index), self.spec.items())}
+
+  def __getstate__(self):
+    d = self.__dict__.copy()
+    if self.parallel:
+      d.pop('pool', None)
+    return d
+
+  def __setstate__(self, d):
+    self.__dict__.update(d)
+    if self.parallel:
+      self.pool = self._make_pool()
 
   def __len__(self):
     return len(self.refreader)
@@ -356,15 +372,18 @@ class DatasetReader(Closing):
           requests[key] = range(start, stop)
         else:
           raise TypeError((msk, type(msk)))
-
       else:
         if not isinstance(msk, bool):
           raise TypeError((key, mask))
         if not msk:
           continue
         requests[key] = ref[i]
-    # TODO: Fetch modalities concurrently.
-    datapoint = {k: self.readers[k][r] for k, r in requests.items()}
+    if self.parallel:
+      values = self.pool.map(
+          lambda it: self.readers[it[0]][it[1]], requests.items())
+      datapoint = dict(zip(requests.keys(), values))
+    else:
+      datapoint = {k: self.readers[k][r] for k, r in requests.items()}
     decoded = {
         k: self._decode(k, v, self.spec[k])
         for k, v in datapoint.items()}
@@ -402,6 +421,9 @@ class DatasetReader(Closing):
     except Exception:
       print(f"Error decoding key '{key}' of type '{dtype}'.")
       raise
+
+  def _make_pool(self):
+    return concurrent.futures.ThreadPoolExecutor(len(self.spec) + 1)
 
 
 class BagWriter(Closing):
