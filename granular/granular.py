@@ -423,7 +423,7 @@ class DatasetReader(Closing):
       raise
 
   def _make_pool(self):
-    return concurrent.futures.ThreadPoolExecutor(len(self.spec) + 1)
+    return concurrent.futures.ThreadPoolExecutor(len(self.spec))
 
 
 class BagWriter(Closing):
