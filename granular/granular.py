@@ -135,7 +135,7 @@ class ShardedDatasetWriter(Closing):
 class ShardedDatasetReader(Closing):
 
   def __init__(
-      self, directory, decoders, cache_index=True, cache_refs=False,
+      self, directory, decoders, cache_index=True, cache_keys=(),
       parallel=False, shardstart=0, shardstep=1):
     super().__init__()
     if isinstance(directory, str):
@@ -147,12 +147,12 @@ class ShardedDatasetReader(Closing):
     assert selected, (folders, selected, shardstart, shardstep)
     if parallel:
       make = lambda x: DatasetReader(
-          x, decoders, cache_index, cache_refs, parallel)
+          x, decoders, cache_index, cache_keys, parallel)
       with concurrent.futures.ThreadPoolExecutor(len(selected)) as pool:
         self.readers = list(pool.map(make, selected))
     else:
       self.readers = [
-          DatasetReader(x, decoders, cache_index, cache_refs, parallel)
+          DatasetReader(x, decoders, cache_index, cache_keys, parallel)
           for x in selected]
     lengths = [len(x) for x in self.readers]
     self.stops = list(itertools.accumulate(lengths, operator.add))
@@ -299,21 +299,19 @@ class DatasetReader(Closing):
 
   def __init__(
       self, directory, decoders,
-      cache_index=True, cache_refs=False, parallel=False):
+      cache_index=True, cache_keys=(), parallel=False):
     super().__init__()
+    assert isinstance(cache_keys, (tuple, list)), cache_keys
     if isinstance(directory, str):
       directory = pathlib.Path(directory)
     with (directory / 'spec.json').open('rb') as f:
       self.thespec = json.loads(f.read())
-    if cache_refs:
-      with (directory / 'refs.bag').open('rb') as f:
-        source = f.read()
-      self.refreader = BagReader(source, cache_index)
-    else:
-      self.refreader = BagReader(directory / 'refs.bag', cache_index)
+    assert all(k in self.thespec or k == 'refs' for k in cache_keys), (
+        self.thespec, cache_keys)
     self.readers = {
-        k: BagReader(directory / f'{k}.bag', cache_index)
-        for k in self.spec.keys()}
+        k: BagReader(
+            directory / f'{k}.bag', cache_index, cache_data=(k in cache_keys))
+        for k in ('refs', *self.spec.keys())}
     if decoders is None:
       decoders = {k: None for k in self.spec.keys()}
     else:
@@ -329,7 +327,7 @@ class DatasetReader(Closing):
 
   @property
   def size(self):
-    return sum(x.size for x in self.readers.values()) + self.refreader.size
+    return sum(x.size for x in self.readers.values())
 
   def mask(self, index):
     return {
@@ -348,7 +346,7 @@ class DatasetReader(Closing):
       self.pool = self._make_pool()
 
   def __len__(self):
-    return len(self.refreader)
+    return len(self.readers['refs'])
 
   def __getitem__(self, index):
     if isinstance(index, tuple):
@@ -400,13 +398,12 @@ class DatasetReader(Closing):
     return pickle.loads(pickle.dumps(self))
 
   def close(self):
-    self.refreader.close()
     for reader in self.readers.values():
       reader.close()
 
   @functools.lru_cache(maxsize=1)
   def _getref(self, index):
-    ref = self.refreader[index]
+    ref = self.readers['refs'][index]
     ref = msgpack.unpackb(ref)
     assert len(ref) == len(self.spec)
     for (key, dtype), r in zip(self.spec.items(), ref):
@@ -487,27 +484,30 @@ class BagWriter(Closing):
 
 class BagReader(Closing):
 
-  def __init__(self, source, cache_index=True):
+  def __init__(self, source, cache_index=True, cache_data=False):
     super().__init__()
     if isinstance(source, str):
       source = pathlib.Path(source)
-    if not hasattr(source, 'open'):
+    if cache_data and hasattr(source, 'open'):
       cache_index = False
+      with source.open('rb') as f:
+        source = SharedBuffer(f.read())
+    if not hasattr(source, 'open'):
+      cache_index, cache_data = False, False
       source = SharedBuffer(source)
-    file = source.open('rb')
-    assert file.readable(), file
-    file.seek(-8, os.SEEK_END)
-    self.filesize = file.tell() + 8
-    self.recordend = int.from_bytes(file.read(8), 'little')
+    self.source = source
+    self.file = source.open('rb')
+    assert self.file.readable(), self.file
+    self.file.seek(-8, os.SEEK_END)
+    self.filesize = self.file.tell() + 8
+    self.recordend = int.from_bytes(self.file.read(8), 'little')
     self.length = (self.filesize - 8 - self.recordend) // 8
     if cache_index:
-      file.seek(self.recordend, os.SEEK_SET)
-      limits = file.read(8 * self.length + 8)
+      self.file.seek(self.recordend, os.SEEK_SET)
+      limits = self.file.read(8 * self.length + 8)
       self.limits = SharedBuffer(limits)
     else:
       self.limits = None
-    self.source = source
-    self.file = file
 
   def __getstate__(self):
     return {

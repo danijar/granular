@@ -11,9 +11,9 @@ seekable container structure.
 ## Features
 
 - 🚀 **Performance:** Minimal overhead for maximum read and write throughput.
-- 🔎 **Seekable:** Fast random access from disk by datapoint index.
-- 🎞️ **Sequences:** Datapoints can contain seekable ranges of modalities.
-- 🤸 **Flexible:** User provides encoders and decoders; examples available.
+- 🔎 **Seeking:** Fast random access from disk by datapoint index.
+- 🎞️ **Sequences:** Datapoints can contain seekable lists of modalities.
+- 🤸 **Flexibility:** User provides encoders and decoders; examples available.
 - 👥 **Sharding:** Store datasets into shards to split processing workloads.
 
 ## Installation
@@ -51,8 +51,8 @@ encoders = {
 
 with granular.ShardedDatasetWriter(
     directory, spec, encoders, shardlen=1000) as writer:
-  writer.append({'foo': 42, 'bar': ['hello', 'world'], 'baz': {'a': 1})
-  # ...
+  for i in range(2500):
+    writer.append({'foo': 42, 'bar': ['hello', 'world'], 'baz': {'a': 1})
 ```
 
 Files
@@ -98,12 +98,14 @@ with granular.ShardedDatasetReader(directory, decoders) as reader:
   # Read a subset of keys of a datapoint. For example, this allows quickly
   # iterating over the metadata fields of all datapoints without accessing
   # expensive image or video modalities.
-  assert reader[0, {'foo': True, 'baz': True}] == {'foo': 42, 'baz': {'a': 1}}
+  mask = {'foo': True, 'baz': True}
+  assert reader[0, mask] == {'foo': 42, 'baz': {'a': 1}}
 
   # Read only a slice of the 'bar' list. Only the requested slice will be
   # fetched from disk. For example, the could be used to load a subsequence of
   # a long video that is stored as list of consecutive MP4 clips.
-  assert reader[0, {'bar': range(1, 2)}] == {'bar': ['world']}
+  mask = {'bar': range(1, 2)}
+  assert reader[0, mask] == {'bar': ['world']}
 ```
 
 For small datasets where sharding is not necessary, you can also use
