@@ -2,10 +2,10 @@ import io
 from functools import partial as bind
 
 import msgpack
+import numpy as np
 
 
 def encode_int(value, size=None, endian='little'):
-  import numpy as np
   if size is None:
     size = np.ceil(np.log2(1 + value) / 8)
   return value.to_bytes(int(size), endian)
@@ -22,13 +22,11 @@ def encode_array(value):
 
 
 def decode_array(buffer):
-  import numpy as np
   dtype, shape, data = msgpack.unpackb(buffer)
   return np.frombuffer(data, dtype).reshape(shape)
 
 
 def encode_tree(value):
-  import numpy as np
   def fn(xs):
     if isinstance(xs, (list, tuple)):
       return [fn(x) for x in xs]
@@ -43,7 +41,6 @@ def encode_tree(value):
 
 
 def decode_tree(buffer):
-  import numpy as np
   def fn(xs):
     if isinstance(xs, list) and len(xs) == 4 and xs[0] == '_':
       _, dtype, shape, data = xs
@@ -66,7 +63,6 @@ def encode_image(value, quality=100, format='jpg'):
 
 
 def decode_image(buffer, *args):
-  import numpy as np
   from PIL import Image
   return np.asarray(Image.open(io.BytesIO(buffer)))
 
@@ -90,7 +86,6 @@ def encode_mp4(array, fps=20):
 
 
 def decode_mp4(buffer, *args):
-  import numpy as np
   import av
   container = av.open(io.BytesIO(buffer))
   stream = container.streams.video[0]
