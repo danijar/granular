@@ -9,3 +9,5 @@ from .granular import BagReader
 
 from .formats import encoders
 from .formats import decoders
+
+from .loader import Loader

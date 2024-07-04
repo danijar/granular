@@ -1,2 +1,3 @@
 cloudpickle
 msgpack
+numpy
