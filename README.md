@@ -1,10 +1,10 @@
 [![PyPI](https://img.shields.io/pypi/v/granular.svg)](https://pypi.python.org/pypi/granular/#history)
 
-# Granular: Fast dataset format
+# Granular
 
-Granular is a library for reading and writing multimodal datasets. Each
-Granular dataset is a collection of linked files in [bag file format][bag], a
-simple seekable container structure. Granular comes with a high-performance
+Granular is a format for datasets, from simple to complex. Each Granular
+dataset is a collection of linked files in [bag file format][bag], a
+seekable container structure. Granular comes with a high-performance
 data loader.
 
 [bag]: ...
