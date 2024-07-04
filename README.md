@@ -7,6 +7,10 @@ dataset is a collection of linked files in [bag file format][bag], a
 seekable container structure. Granular comes with a high-performance
 data loader.
 
+```
+pip install granular
+```
+
 [bag]: ...
 
 ## Features
@@ -17,12 +21,7 @@ data loader.
 - 🤸 **Flexibility:** User provides encoders and decoders; examples available.
 - 👥 **Sharding:** Store datasets into shards to split processing workloads.
 - 🔄 **Determinism:** Deterministic and resumable global shuffling per epoch.
-
-## Installation
-
-```
-pip install granular
-```
+- ✅ **Correctness:** A suite of unit tests with high code coverage.
 
 ## Quickstart
 
