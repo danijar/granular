@@ -2,6 +2,7 @@ import io
 import os
 import pathlib
 import pickle
+from multiprocessing import shared_memory
 
 from . import utils
 
@@ -67,10 +68,10 @@ class BagReader(utils.Closing):
     if cache_data and hasattr(source, 'open'):
       cache_index = False
       with source.open('rb') as f:
-        source = utils.SharedBuffer(f.read())
+        source = SharedBuffer(f.read())
     if not hasattr(source, 'open'):
       cache_index, cache_data = False, False
-      source = utils.SharedBuffer(source)
+      source = SharedBuffer(source)
     self.source = source
     self.file = source.open('rb')
     assert self.file.readable(), self.file
@@ -81,7 +82,7 @@ class BagReader(utils.Closing):
     if cache_index:
       self.file.seek(self.recordend, os.SEEK_SET)
       limits = self.file.read(8 * self.length + 8)
-      self.limits = utils.SharedBuffer(limits)
+      self.limits = SharedBuffer(limits)
     else:
       self.limits = None
 
@@ -163,3 +164,36 @@ class BagReader(utils.Closing):
           int.from_bytes(limits[8 * i: 8 * (i + 1)], 'little')
           for i in range(stop - start)]
       return limits
+
+
+class SharedBuffer:
+
+  ENABLE = True
+
+  def __init__(self, content):
+    if self.ENABLE:
+      self.sm = shared_memory.SharedMemory(create=True, size=len(content))
+      self.sm.buf[:] = memoryview(content)
+      self.buf = self.sm.buf
+    else:
+      self.buf = bytes(content)
+
+  def __getitem__(self, index):
+    return self.buf[index]
+
+  def __getstate__(self):
+    if self.ENABLE:
+      return self.sm.name
+    else:
+      return self.buf
+
+  def __setstate__(self, value):
+    if self.ENABLE:
+      self.sm = shared_memory.SharedMemory(name=value)
+      self.buf = self.sm.buf
+    else:
+      self.buf = value
+
+  def open(self, mode='rb'):
+    assert mode in ('rb', 'wb'), mode
+    return io.BytesIO(self.buf)

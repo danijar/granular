@@ -1,11 +1,12 @@
 import atexit
 import collections
 import functools
-import multiprocessing as mp
+import multiprocessing
 import queue
 import sys
 import time
 import traceback
+from multiprocessing import shared_memory
 
 import numpy as np
 import cloudpickle
@@ -16,8 +17,8 @@ from . import utils
 class Loader:
 
   def __init__(
-      self, source, fns, batch, shuffle=True, prefetch=10,
-      workers=128, shard_id=0, num_shards=1, seed=0):
+      self, source, batch, fns=(), shuffle=True, prefetch=10,
+      workers=32, shard_id=0, num_shards=1, mp=None, seed=0):
 
     self.source = source
     self.fns = fns
@@ -34,17 +35,18 @@ class Loader:
     self.batches = collections.deque()
     self.futures = collections.deque()
 
+    self.mp = mp or multiprocessing.get_context('spawn')
     self.started = False
-    self.stop = mp.Event()
-    self.iqueue = mp.Queue()
-    self.oqueue = mp.Queue()
+    self.stop = self.mp.Event()
+    self.iqueue = self.mp.Queue()
+    self.oqueue = self.mp.Queue()
     self.received = set()
 
     self.workers = []
     fns = cloudpickle.dumps(fns)
     args = (self.stop, self.iqueue, self.oqueue, source, fns, seed)
     for _ in range(workers):
-      self.workers.append(mp.Process(target=self._worker, args=args))
+      self.workers.append(self.mp.Process(target=self._worker, args=args))
     atexit.register(self.close)
 
   @functools.cached_property
@@ -82,14 +84,11 @@ class Loader:
     self.seed = d['seed']
 
   def close(self):
+    self.source.close()
     self.stop.set()
     time.sleep(0.2)
     [x.join(timeout=0) for x in self.workers]
-    for worker in self.workers:
-      if worker.is_alive():
-        worker.terminate()
-    time.sleep(0.1)
-    [x.join(timeout=0) for x in self.workers]
+    [x.terminate() for x in self.workers if x.is_alive()]
     for q in (self.iqueue, self.oqueue):
       q.close()
       q.cancel_join_thread()
@@ -106,7 +105,7 @@ class Loader:
         except queue.Empty:
           continue
         index, step, batchdesc, loc = job
-        batch = {k: utils.SharedArray(*v) for k, v in batchdesc.items()}
+        batch = {k: SharedArray(*v) for k, v in batchdesc.items()}
         datapoint = source[index]
         datapoint = {k: np.asarray(v) for k, v in datapoint.items()}
         for fn in fns:
@@ -124,7 +123,7 @@ class Loader:
 
   def _request(self):
     batch = {
-        k: utils.SharedArray(d, (self.batch, *s))
+        k: SharedArray(d, (self.batch, *s))
         for k, (d, s) in self.spec.items()}
     batchdesc = {k: v.desc for k, v in batch.items()}
     self.batches.append(batch)
@@ -158,3 +157,43 @@ class Loader:
       return rng.permutation(np.arange(self.length)).tolist()
     else:
       return list(range(self.length))
+
+
+class SharedArray:
+
+  def __init__(self, dtype, shape, name=None):
+    dtype = np.dtype(dtype)
+    self.dtype = dtype
+    self.shape = shape
+    if name:
+      self.sm = shared_memory.SharedMemory(name=name)
+      self.created = True
+    else:
+      size = int(np.prod(shape)) * dtype.itemsize
+      self.sm = shared_memory.SharedMemory(create=True, size=size)
+      self.created = False
+    self.array = np.ndarray(shape, dtype, self.sm.buf)
+    assert self.array.data.c_contiguous
+
+  @property
+  def name(self):
+    return self.sm.name
+
+  @property
+  def desc(self):
+    return (self.dtype.str, self.shape, self.name)
+
+  def __getattr__(self, name):
+    return getattr(self.array, name)
+
+  def __getitem__(self, index):
+    return self.array[index]
+
+  def __setitem__(self, index, value):
+    self.array[index] = value
+
+  def close(self):
+    self.sm.close()
+
+  def unlink(self):
+    self.sm.unlink()

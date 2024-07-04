@@ -1,3 +1,4 @@
+import concurrent.futures
 import itertools
 import json
 import operator
@@ -96,7 +97,7 @@ class ShardedDatasetReader(utils.Closing):
     if parallel:
       make = lambda x: dataset.DatasetReader(
           x, decoders, cache_index, cache_keys, parallel)
-      with utils.ThreadPool(len(selected)) as pool:
+      with concurrent.futures.ThreadPoolExecutor(len(selected)) as pool:
         self.readers = list(pool.map(make, selected))
     else:
       self.readers = [

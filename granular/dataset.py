@@ -1,3 +1,4 @@
+import concurrent.futures
 import functools
 import json
 import pathlib
@@ -126,7 +127,7 @@ class DatasetReader(utils.Closing):
     self.decoders = decoders
     self.parallel = parallel
     if parallel:
-      self.pool = utils.ThreadPool(len(self.spec))
+      self.pool = concurrent.futures.ThreadPoolExecutor(len(self.spec))
 
   @property
   def spec(self):
@@ -144,13 +145,13 @@ class DatasetReader(utils.Closing):
   def __getstate__(self):
     d = self.__dict__.copy()
     if self.parallel:
-      d.pop('pool', None)
+      d.pop('pool')
     return d
 
   def __setstate__(self, d):
     self.__dict__.update(d)
     if self.parallel:
-      self.pool = utils.ThreadPool(len(self.spec))
+      self.pool = concurrent.futures.ThreadPoolExecutor(len(self.spec))
 
   def __len__(self):
     return len(self.readers['refs'])
@@ -205,6 +206,8 @@ class DatasetReader(utils.Closing):
     return pickle.loads(pickle.dumps(self))
 
   def close(self):
+    if self.parallel:
+      self.pool.shutdown(wait=False)
     for reader in self.readers.values():
       reader.close()
 

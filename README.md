@@ -18,14 +18,9 @@ seekable container structure.
 
 ## Installation
 
-Granular is [a single file][file], so you can just copy it to your project
-directory. Or you can install the package:
-
 ```
 pip install granular
 ```
-
-[file]: https://github.com/danijar/granular/blob/main/granular/granular.py
 
 ## Quickstart
 
