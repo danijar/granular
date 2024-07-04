@@ -83,7 +83,6 @@ class Loader:
     self.seed = d['seed']
 
   def close(self):
-    self.source.close()
     self.stop.set()
     time.sleep(0.2)
     [x.join(timeout=0) for x in self.workers]
