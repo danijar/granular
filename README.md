@@ -209,7 +209,7 @@ reading ranges of the value without loading the whole sequence from disk using
 masking:
 
 ```python
-available = reader.mask(index)
+available = reader.available(index)
 print(available)
 # {'title': True, 'frames': range(54), 'captions': range(7), 'times': range(7)}
 

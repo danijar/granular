@@ -122,7 +122,7 @@ class TestSharded:
     assert datapoints == received
 
   @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
-  def test_masks(self, tmpdir, shardlen):
+  def test_available(self, tmpdir, shardlen):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
     datapoints = []
@@ -136,7 +136,7 @@ class TestSharded:
         datapoints.append(datapoint)
     with granular.ShardedDatasetReader(directory, granular.decoders) as reader:
       for i in range(10):
-        mask = reader.mask(i)
-        assert mask == {'bar': True, 'baz': range(i), 'foo': True}
-        datapoint = reader[i, mask]
+        available = reader.available(i)
+        assert available == {'bar': True, 'baz': range(i), 'foo': True}
+        datapoint = reader[i, available]
         assert datapoint == datapoints[i]

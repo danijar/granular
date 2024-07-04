@@ -120,9 +120,9 @@ class ShardedDatasetReader(utils.Closing):
   def shards(self):
     return len(self.readers)
 
-  def mask(self, index):
+  def available(self, index):
     reader, local_index = self._resolve(index)
-    return reader.mask(local_index)
+    return reader.available(local_index)
 
   def __len__(self):
     return self.length

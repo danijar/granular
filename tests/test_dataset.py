@@ -83,7 +83,7 @@ class TestDataset:
 
   @pytest.mark.parametrize('cache_index', (True, False))
   @pytest.mark.parametrize('cache_keys', ([], ['refs'], ['refs', 'baz']))
-  def test_masks(self, tmpdir, cache_index, cache_keys):
+  def test_available(self, tmpdir, cache_index, cache_keys):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
     datapoints = []
@@ -97,9 +97,9 @@ class TestDataset:
         directory, granular.decoders, cache_index, cache_keys)
     with reader:
       for i in range(10):
-        mask = reader.mask(i)
-        assert mask == {'bar': True, 'baz': range(i), 'foo': True}
-        datapoint = reader[i, mask]
+        available = reader.available(i)
+        assert available == {'bar': True, 'baz': range(i), 'foo': True}
+        datapoint = reader[i, available]
         assert datapoint == datapoints[i]
 
   @pytest.mark.parametrize('cache_index', (True, False))

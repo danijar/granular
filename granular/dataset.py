@@ -137,7 +137,7 @@ class DatasetReader(utils.Closing):
   def size(self):
     return sum(x.size for x in self.readers.values())
 
-  def mask(self, index):
+  def available(self, index):
     return {
         key: range(0, ref[1] if ref else 0) if dtype.endswith('[]') else True
         for ref, (key, dtype) in zip(self._getref(index), self.spec.items())}
