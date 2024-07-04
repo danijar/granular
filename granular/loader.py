@@ -6,12 +6,11 @@ import queue
 import sys
 import time
 import traceback
+import weakref
 from multiprocessing import shared_memory
 
 import numpy as np
 import cloudpickle
-
-from . import utils
 
 
 class Loader:
@@ -148,7 +147,9 @@ class Loader:
       if needed in self.received:
         self.received.remove(needed)
         collected += 1
-    return self.batches.popleft()
+    batch = self.batches.popleft()
+    batch = {k: v.array for k, v in batch.items()}
+    return batch
 
   @functools.lru_cache(maxsize=1)
   def _order(self, epoch):
@@ -172,8 +173,14 @@ class SharedArray:
       size = int(np.prod(shape)) * dtype.itemsize
       self.sm = shared_memory.SharedMemory(create=True, size=size)
       self.created = False
-    self.array = np.ndarray(shape, dtype, self.sm.buf)
-    assert self.array.data.c_contiguous
+    self.arr = np.ndarray(shape, dtype, self.sm.buf)
+    assert self.arr.data.c_contiguous
+    # Keep shared memory buffer until array is garbage collected.
+    weakref.finalize(self.arr, self.sm.close)
+
+  @property
+  def array(self):
+    return self.arr
 
   @property
   def name(self):
@@ -184,13 +191,13 @@ class SharedArray:
     return (self.dtype.str, self.shape, self.name)
 
   def __getattr__(self, name):
-    return getattr(self.array, name)
+    return getattr(self.arr, name)
 
   def __getitem__(self, index):
-    return self.array[index]
+    return self.arr[index]
 
   def __setitem__(self, index, value):
-    self.array[index] = value
+    self.arr[index] = value
 
   def close(self):
     self.sm.close()
