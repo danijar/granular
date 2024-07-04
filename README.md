@@ -1,11 +1,11 @@
 [![PyPI](https://img.shields.io/pypi/v/granular.svg)](https://pypi.python.org/pypi/granular/#history)
 
-# Granular: Fast format for datasets
+# Granular: Fast dataset format
 
 Granular is a library for reading and writing multimodal datasets. Each
 Granular dataset is a collection of linked files in [bag file format][bag], a
-simple seekable container structure. Granular includes a high-performance data
-loader that can load from Cloud buckets.
+simple seekable container structure. Granular comes with a high-performance
+data loader.
 
 [bag]: ...
 
