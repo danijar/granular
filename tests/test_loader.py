@@ -1,4 +1,6 @@
+import multiprocessing
 import pathlib
+import queue
 import sys
 
 import numpy as np
@@ -69,3 +71,49 @@ class TestLoader:
         seen.update(data['foo'])
       else:
         seen.clear()
+
+  def test_shared_array_pool(self):
+    import granular.loader
+    mp = multiprocessing.get_context('spawn')
+    array = granular.loader.SharedArray((10, 8), np.int32)
+    with mp.Pool(4) as pool:
+      list(pool.map(fill1, ((array, i) for i in reversed(range(10)))))
+    result = array.result()
+    assert result.shape == (10, 8)
+    assert (result == np.arange(10)[:, None]).all()
+
+  def test_shared_array_queue(self):
+    import granular.loader
+    mp = multiprocessing.get_context('spawn')
+    array = granular.loader.SharedArray((10, 8), np.int32)
+    stop = mp.Event()
+    iqueue = mp.Queue()
+    oqueue = mp.Queue()
+    args = (stop, iqueue, oqueue)
+    workers = [mp.Process(target=fill2, args=args) for _ in range(4)]
+    [x.start() for x in workers]
+    for i in reversed(range(10)):
+      iqueue.put((array, i))
+    for i in reversed(range(10)):
+      oqueue.get()
+    stop.set()
+    [x.join() for x in workers]
+    result = array.result()
+    assert result.shape == (10, 8)
+    assert (result == np.arange(10)[:, None]).all()
+
+
+def fill1(args):
+  target, i = args
+  target.array[i] = i
+
+
+def fill2(stop, iqueue, oqueue):
+  while not stop.is_set():
+    try:
+      message = iqueue.get(timeout=0.1)
+    except queue.Empty:
+      continue
+    target, i = message
+    target.array[i] = i
+    oqueue.put(i)

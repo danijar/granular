@@ -1,6 +1,7 @@
 import atexit
 import collections
 import functools
+import math
 import multiprocessing
 import queue
 import sys
@@ -91,6 +92,8 @@ class Loader:
       q.close()
       q.cancel_join_thread()
       q.join_thread()
+    for batch in self.batches:
+      [x.close() for x in batch.values()]
     self.batches.clear()
 
   @classmethod
@@ -102,8 +105,7 @@ class Loader:
           job = iqueue.get(timeout=0.1)
         except queue.Empty:
           continue
-        index, step, batchdesc, loc = job
-        batch = {k: SharedArray(*v) for k, v in batchdesc.items()}
+        index, step, batch, loc = job
         datapoint = source[index]
         datapoint = {k: np.asarray(v) for k, v in datapoint.items()}
         for fn in fns:
@@ -111,7 +113,7 @@ class Loader:
           assert isinstance(datapoint, dict), fn
         assert datapoint.keys() == batch.keys()
         for key, value in datapoint.items():
-          batch[key][loc] = value
+          batch[key].array[loc] = value
         oqueue.put(step)
     except (SystemExit, KeyboardInterrupt):
       stop.set()
@@ -121,14 +123,13 @@ class Loader:
 
   def _request(self):
     batch = {
-        k: SharedArray(d, (self.batch, *s))
+        k: SharedArray((self.batch, *s), d)
         for k, (d, s) in self.spec.items()}
-    batchdesc = {k: v.desc for k, v in batch.items()}
     self.batches.append(batch)
     for loc in range(self.batch):
       epoch = self.step // self.length
       index = self._order(epoch)[self.step % self.length]
-      self.iqueue.put((index, self.step, batchdesc, loc))
+      self.iqueue.put((index, self.step, batch, loc))
       self.step += self.num_shards
 
   def _receive(self):
@@ -147,7 +148,7 @@ class Loader:
         self.received.remove(needed)
         collected += 1
     batch = self.batches.popleft()
-    batch = {k: v.array for k, v in batch.items()}
+    batch = {k: v.result() for k, v in batch.items()}
     return batch
 
   @functools.lru_cache(maxsize=1)
@@ -161,45 +162,30 @@ class Loader:
 
 class SharedArray:
 
-  def __init__(self, dtype, shape, name=None):
-    dtype = np.dtype(dtype)
-    self.dtype = dtype
-    self.shape = shape
+  def __init__(self, shape, dtype, name=None):
     if name:
-      self.sm = shared_memory.SharedMemory(name=name)
-      self.created = True
+      self.shm = shared_memory.SharedMemory(name=name)
     else:
-      size = int(np.prod(shape)) * dtype.itemsize
-      self.sm = shared_memory.SharedMemory(create=True, size=size)
-      self.created = False
-    self.arr = np.ndarray(shape, dtype, self.sm.buf)
-    assert self.arr.data.c_contiguous
-    # Keep shared memory buffer until array is garbage collected.
-    weakref.finalize(self.arr, self.sm.close)
+      size = math.prod(shape) * np.dtype(dtype).itemsize
+      self.shm = shared_memory.SharedMemory(create=True, size=size)
+    self.arr = np.ndarray(shape, dtype, self.shm.buf)
+    weakref.finalize(self.arr, self.shm.close)
 
   @property
   def array(self):
     return self.arr
 
-  @property
-  def name(self):
-    return self.sm.name
-
-  @property
-  def desc(self):
-    return (self.dtype.str, self.shape, self.name)
-
-  def __getattr__(self, name):
-    return getattr(self.arr, name)
-
-  def __getitem__(self, index):
-    return self.arr[index]
-
-  def __setitem__(self, index, value):
-    self.arr[index] = value
+  def result(self):
+    weakref.finalize(self.arr, self.shm.unlink)
+    self.arr.setflags('writable', False)
+    return self.arr
 
   def close(self):
-    self.sm.close()
+    self.shm.unlink()
+    self.arr = None
 
-  def unlink(self):
-    self.sm.unlink()
+  def __getstate__(self):
+    return (self.arr.shape, self.arr.dtype.str, self.shm.name)
+
+  def __setstate__(self, args):
+    self.__init__(*args)
