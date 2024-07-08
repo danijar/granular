@@ -30,6 +30,29 @@ class TestLoader:
       assert (data['foo'] == (
           np.arange(i, i + batch) % len(datapoints))).all()
       assert (data['bar'] == np.ones((batch, 3, 3))).all()
+    dataset.close()
+    source.close()
+
+  @pytest.mark.parametrize('recycle_after', (False, 1, 2))
+  def test_recycle(self, tmpdir, recycle_after, batch=3):
+    directory = pathlib.Path(tmpdir) / 'dataset'
+    spec = {'foo': 'int', 'bar': 'array'}
+    datapoints = [{'foo': i, 'bar': np.ones((3, 3))} for i in range(10)]
+    with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
+      [writer.append(x) for x in datapoints]
+    source = granular.DatasetReader(directory, granular.decoders)
+    dataset = iter(granular.Loader(
+        source, batch, shuffle=False, workers=4, recycle_after=recycle_after))
+    for i in range(0, 2 * len(datapoints), batch):
+      data = next(dataset)
+      assert set(data.keys()) == {'foo', 'bar'}
+      assert data['foo'].shape == (batch,)
+      assert data['bar'].shape == (batch, 3, 3)
+      assert (data['foo'] == (
+          np.arange(i, i + batch) % len(datapoints))).all()
+      assert (data['bar'] == np.ones((batch, 3, 3))).all()
+    dataset.close()
+    source.close()
 
   @pytest.mark.parametrize('batch', (1, 3))
   def test_shuffled(self, tmpdir, batch):
@@ -49,6 +72,8 @@ class TestLoader:
         seen.update(data['foo'])
       else:
         seen.clear()
+    dataset.close()
+    source.close()
 
   @pytest.mark.parametrize('kwargs', (
       dict(cache_index=False, cache_keys=[], parallel=False),
@@ -71,6 +96,8 @@ class TestLoader:
         seen.update(data['foo'])
       else:
         seen.clear()
+    dataset.close()
+    source.close()
 
   def test_shared_array_pool(self):
     import granular.loader

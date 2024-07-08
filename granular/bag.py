@@ -1,3 +1,4 @@
+import atexit
 import io
 import os
 import pathlib
@@ -142,6 +143,10 @@ class BagReader(utils.Closing):
   def close(self):
     assert not self.closed
     self.file.close()
+    if isinstance(self.limits, SharedBuffer):
+      self.limits.close()
+    if isinstance(self.source, SharedBuffer):
+      self.source.close()
 
   def _get_start(self, index):
     if self.limits:
@@ -172,9 +177,9 @@ class SharedBuffer:
 
   def __init__(self, content):
     if self.ENABLE:
-      self.sm = shared_memory.SharedMemory(create=True, size=len(content))
-      self.sm.buf[:] = memoryview(content)
-      self.buf = self.sm.buf
+      self.shm = shared_memory.SharedMemory(create=True, size=len(content))
+      self.shm.buf[:] = memoryview(content)
+      self.buf = self.shm.buf
     else:
       self.buf = bytes(content)
 
@@ -183,17 +188,24 @@ class SharedBuffer:
 
   def __getstate__(self):
     if self.ENABLE:
-      return self.sm.name
+      return self.shm.name
     else:
       return self.buf
 
   def __setstate__(self, value):
     if self.ENABLE:
-      self.sm = shared_memory.SharedMemory(name=value)
-      self.buf = self.sm.buf
+      self.shm = shared_memory.SharedMemory(name=value)
+      self.buf = self.shm.buf
     else:
       self.buf = value
 
   def open(self, mode='rb'):
     assert mode in ('rb', 'wb'), mode
     return io.BytesIO(self.buf)
+
+  def close(self):
+    self.buf = None
+    try:
+      self.shm.unlink()
+    except FileNotFoundError:
+      pass

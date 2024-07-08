@@ -18,8 +18,9 @@ import cloudpickle
 class Loader:
 
   def __init__(
-      self, source, batch, fns=(), shuffle=True, prefetch=10,
-      workers=32, shard_id=0, num_shards=1, mp=None, seed=0):
+      self, source, batch, fns=(), shuffle=True,
+      prefetch=10, workers=32, recycle_after=False,
+      shard_id=0, num_shards=1, mp=None, seed=0):
 
     self.source = source
     self.fns = fns
@@ -33,8 +34,10 @@ class Loader:
     self.length = len(source)
     self.step = 0
     self.consumed = 0
-    self.batches = collections.deque()
     self.futures = collections.deque()
+    self.batches = collections.deque()
+    self.recycle_after = int(recycle_after)
+    self.recycle_queue = collections.deque()
 
     self.mp = mp or multiprocessing.get_context('spawn')
     self.started = False
@@ -124,9 +127,12 @@ class Loader:
       oqueue.put(''.join(traceback.format_exception(sys.exception())))
 
   def _request(self):
-    batch = {
-        k: SharedArray((self.batch, *s), d)
-        for k, (d, s) in self.spec.items()}
+    if len(self.recycle_queue) > self.recycle_after:
+      batch = self.recycle_queue.popleft()
+    else:
+      batch = {
+          k: SharedArray((self.batch, *s), d)
+          for k, (d, s) in self.spec.items()}
     self.batches.append(batch)
     for loc in range(self.batch):
       epoch = self.step // self.length
@@ -150,6 +156,8 @@ class Loader:
         self.received.remove(needed)
         collected += 1
     batch = self.batches.popleft()
+    if self.recycle_after:
+      self.recycle_queue.append(batch)
     batch = {k: v.result() for k, v in batch.items()}
     return batch
 
@@ -178,13 +186,15 @@ class SharedArray:
     return self.arr
 
   def result(self):
-    weakref.finalize(self.arr, self.shm.unlink)
-    self.arr.setflags('writable', False)
+    weakref.finalize(self.arr, self.close)
     return self.arr
 
   def close(self):
-    self.shm.unlink()
     self.arr = None
+    try:
+      self.shm.unlink()
+    except FileNotFoundError:
+      pass
 
   def __getstate__(self):
     return (self.arr.shape, self.arr.dtype.str, self.shm.name)

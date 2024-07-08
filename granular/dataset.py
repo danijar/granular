@@ -125,9 +125,10 @@ class DatasetReader(utils.Closing):
     else:
       decoders = {k: decoders[v.rstrip('[]')] for k, v in self.spec.items()}
     self.decoders = decoders
-    self.parallel = parallel
-    if parallel:
-      self.pool = concurrent.futures.ThreadPoolExecutor(len(self.spec))
+    self.cache_keys = cache_keys
+    self.workers = int(parallel and len(set(self.spec) - set(cache_keys)))
+    if self.workers:
+      self.pool = concurrent.futures.ThreadPoolExecutor(self.workers)
 
   @property
   def spec(self):
@@ -144,14 +145,14 @@ class DatasetReader(utils.Closing):
 
   def __getstate__(self):
     d = self.__dict__.copy()
-    if self.parallel:
+    if self.workers:
       d.pop('pool')
     return d
 
   def __setstate__(self, d):
     self.__dict__.update(d)
-    if self.parallel:
-      self.pool = concurrent.futures.ThreadPoolExecutor(len(self.spec))
+    if self.workers:
+      self.pool = concurrent.futures.ThreadPoolExecutor(self.workers)
 
   def __len__(self):
     return len(self.readers['refs'])
@@ -191,10 +192,15 @@ class DatasetReader(utils.Closing):
         if not msk:
           continue
         requests[key] = ref[i]
-    if self.parallel:
-      values = self.pool.map(
-          lambda it: self.readers[it[0]][it[1]], requests.items())
-      datapoint = dict(zip(requests.keys(), values))
+    if self.workers:
+      reqs1 = {k: v for k, v in requests.items() if k not in self.cache_keys}
+      reqs2 = {k: v for k, v in requests.items() if k in self.cache_keys}
+      values1 = self.pool.map(
+          lambda it: self.readers[it[0]][it[1]], reqs1.items())
+      values2 = [self.readers[k][r] for k, r in reqs2.items()]
+      datapoint = dict(
+          list(zip(reqs1.keys(), values1)) +
+          list(zip(reqs2.keys(), values2)))
     else:
       datapoint = {k: self.readers[k][r] for k, r in requests.items()}
     decoded = {
@@ -206,7 +212,7 @@ class DatasetReader(utils.Closing):
     return pickle.loads(pickle.dumps(self))
 
   def close(self):
-    if self.parallel:
+    if self.workers:
       self.pool.shutdown(wait=False)
     for reader in self.readers.values():
       reader.close()
