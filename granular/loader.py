@@ -1,4 +1,5 @@
 import atexit
+import concurrent.futures
 import collections
 import functools
 import math
@@ -62,7 +63,8 @@ class Loader:
     self.started = True
     for _ in range(self.prefetch):
       self._request()
-    [x.start() for x in self.workers]
+    with concurrent.futures.ThreadPoolExecutor(len(self.workers)) as pool:
+      list(pool.map(lambda x: x.start(), self.workers))
     return self
 
   def __next__(self):
