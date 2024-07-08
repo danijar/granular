@@ -1,4 +1,3 @@
-import atexit
 import io
 import os
 import pathlib

@@ -158,7 +158,9 @@ class Loader:
     batch = self.batches.popleft()
     if self.recycle_after:
       self.recycle_queue.append(batch)
-    batch = {k: v.result() for k, v in batch.items()}
+      batch = {k: v.array for k, v in batch.items()}
+    else:
+      batch = {k: v.result() for k, v in batch.items()}
     return batch
 
   @functools.lru_cache(maxsize=1)

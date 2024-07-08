@@ -86,8 +86,7 @@ class TestBag:
         values.append(value)
         total += size
     reader = granular.BagReader(filename, cache_index)
-    with reader:
-      [reader[i] for i in range(100)]
+    [reader[i] for i in range(100)]
     reader = pickle.loads(pickle.dumps(reader))
     reader = pickle.loads(pickle.dumps(reader))
     with reader:
