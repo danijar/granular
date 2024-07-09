@@ -73,7 +73,7 @@ class BagReader(utils.Closing):
       cache_index, cache_data = False, False
       source = SharedBuffer(source)
     self.source = source
-    self.file = source.open('rb')
+    self.fp = None
     assert self.file.readable(), self.file
     self.file.seek(-8, os.SEEK_END)
     self.filesize = self.file.tell() + 8
@@ -85,6 +85,12 @@ class BagReader(utils.Closing):
       self.limits = SharedBuffer(limits)
     else:
       self.limits = None
+
+  @property
+  def file(self):
+    if not self.fp:
+      self.fp = self.source.open('rb')
+    return self.fp
 
   def __getstate__(self):
     return {
@@ -102,7 +108,7 @@ class BagReader(utils.Closing):
     self.length = d['length']
     self.limits = d['limits']
     self.closed = False
-    self.file = self.source.open('rb')
+    self.fp = None
 
   @property
   def size(self):
@@ -141,7 +147,8 @@ class BagReader(utils.Closing):
 
   def close(self):
     assert not self.closed
-    self.file.close()
+    if self.fp:
+      self.fp.close()
     if isinstance(self.limits, SharedBuffer):
       self.limits.close()
     if isinstance(self.source, SharedBuffer):
