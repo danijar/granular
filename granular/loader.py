@@ -124,7 +124,9 @@ class Loader:
       stop.set()
     except Exception:
       stop.set()
-      oqueue.put(''.join(traceback.format_exception(sys.exception())))
+      tb = ''.join(traceback.format_exception(sys.exception()))
+      print('Exception in worker process:\n' + tb)
+      oqueue.put(tb)
 
   def _request(self):
     if len(self.recycle_queue) > self.recycle_after:
