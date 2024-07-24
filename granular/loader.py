@@ -121,12 +121,13 @@ class Loader:
           batch[key].array[loc] = value
         oqueue.put(step)
     except (SystemExit, KeyboardInterrupt):
+      print('System exit in worker process.', flush=True)
       stop.set()
     except Exception:
-      stop.set()
       tb = ''.join(traceback.format_exception(sys.exception()))
-      print('Exception in worker process:\n' + tb)
+      print('Exception in worker process:\n' + tb, flush=True)
       oqueue.put(tb)
+      stop.set()
 
   def _request(self):
     if len(self.recycle_queue) > self.recycle_after:
