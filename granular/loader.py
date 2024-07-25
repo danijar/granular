@@ -148,12 +148,12 @@ class Loader:
     while collected < self.batch:
       try:
         result = self.oqueue.get(timeout=0.1)
+        if not isinstance(result, int):
+          self.close()
+          raise RuntimeError(result)
+        self.received.add(result)
       except queue.Empty:
-        continue
-      if not isinstance(result, int):
-        self.close()
-        raise RuntimeError(result)
-      self.received.add(result)
+        pass
       needed = self.consumed + collected
       if needed in self.received:
         self.received.remove(needed)
