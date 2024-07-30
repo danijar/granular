@@ -75,7 +75,6 @@ class Loader:
     try:
       self._request()
       batch = self._receive()
-      self.consumed += self.batch * self.num_shards
     except (SystemExit, KeyboardInterrupt):
       self.close()
       raise
@@ -85,8 +84,13 @@ class Loader:
     return {'step': self.consumed, 'seed': self.seed}
 
   def load(self, d):
+    if self.started:
+      for _ in range(self.prefetch):
+        self._receive()
     self.consumed = self.step = d['step']
     self.seed = d['seed']
+    for _ in range(self.prefetch):
+      self._request()
 
   def close(self):
     self.stop.set()
@@ -139,7 +143,7 @@ class Loader:
     self.batches.append(batch)
     for loc in range(self.batch):
       epoch = self.step // self.length
-      index = self._order(epoch)[self.step % self.length]
+      index = self._order(epoch, self.seed)[self.step % self.length]
       self.iqueue.put((index, self.step, batch, loc))
       self.step += self.num_shards
 
@@ -164,12 +168,13 @@ class Loader:
       batch = {k: v.array for k, v in batch.items()}
     else:
       batch = {k: v.result() for k, v in batch.items()}
+    self.consumed += self.batch * self.num_shards
     return batch
 
   @functools.lru_cache(maxsize=1)
-  def _order(self, epoch):
+  def _order(self, epoch, seed):
     if self.shuffle:
-      rng = np.random.default_rng(seed=[self.seed, epoch])
+      rng = np.random.default_rng(seed=[seed, epoch])
       return rng.permutation(np.arange(self.length)).tolist()
     else:
       return list(range(self.length))

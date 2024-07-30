@@ -1,13 +1,9 @@
 import json
 import pathlib
-import sys
-
-import pytest
-
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 import cloudpickle
 import granular
+import pytest
 
 
 class TestDataset:

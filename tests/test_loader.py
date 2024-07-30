@@ -1,14 +1,10 @@
 import multiprocessing
 import pathlib
 import queue
-import sys
-
-import numpy as np
-import pytest
-
-sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 import granular
+import numpy as np
+import pytest
 
 
 class TestLoader:
@@ -128,6 +124,38 @@ class TestLoader:
     result = array.result()
     assert result.shape == (10, 8)
     assert (result == np.arange(10)[:, None]).all()
+
+  @pytest.mark.parametrize('running', (True, False))
+  def test_checkpoint(self, tmpdir, running, batch=2):
+    directory = pathlib.Path(tmpdir) / 'dataset'
+    spec = {'foo': 'int'}
+    datapoints = [{'foo': i} for i in range(10)]
+    with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
+      [writer.append(x) for x in datapoints]
+    source = granular.DatasetReader(directory, granular.decoders)
+    dataset = iter(granular.Loader(source, batch, shuffle=False, workers=4))
+    for i in range(0, 2 * batch, batch):
+      assert np.all(next(dataset)['foo'] == np.arange(i, i + batch) % 10)
+    assert dataset.consumed == 2 * batch
+    state = dataset.save()
+    dataset.close()
+    source.close()
+    del dataset
+    del source
+    source = granular.DatasetReader(directory, granular.decoders)
+    dataset = granular.Loader(source, batch, shuffle=False, workers=4)
+    if running:
+      dataset = iter(dataset)
+      dataset.load(state)
+    else:
+      dataset.load(state)
+      dataset = iter(dataset)
+    assert dataset.consumed == 2 * batch
+    for i in range(2 * batch, 6 * batch, batch):
+      assert np.all(next(dataset)['foo'] == np.arange(i, i + batch) % 10)
+    assert dataset.consumed == 6 * batch
+    dataset.close()
+    source.close()
 
 
 def fill1(args):
