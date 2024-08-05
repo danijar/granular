@@ -89,8 +89,9 @@ class Loader:
         self._receive()
     self.consumed = self.step = d['step']
     self.seed = d['seed']
-    for _ in range(self.prefetch):
-      self._request()
+    if self.started:
+      for _ in range(self.prefetch):
+        self._request()
 
   def close(self):
     self.stop.set()
