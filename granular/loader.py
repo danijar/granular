@@ -96,8 +96,9 @@ class Loader:
   def close(self):
     self.stop.set()
     time.sleep(0.2)
-    [x.join(timeout=0) for x in self.workers]
-    [x.terminate() for x in self.workers if x.is_alive()]
+    if self.started:
+      [x.join(timeout=0) for x in self.workers]
+      [x.terminate() for x in self.workers if x.is_alive()]
     for q in (self.iqueue, self.oqueue):
       q.close()
       q.cancel_join_thread()
