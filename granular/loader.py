@@ -97,7 +97,11 @@ class Loader:
     self.stop.set()
     time.sleep(0.2)
     if self.started:
-      [x.join(timeout=0) for x in self.workers]
+      for worker in self.workers:
+        try:
+          worker.join(timeout=0)
+        except AssertionError:
+          pass
       [x.terminate() for x in self.workers if x.is_alive()]
     for q in (self.iqueue, self.oqueue):
       q.close()
