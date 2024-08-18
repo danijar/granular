@@ -129,7 +129,7 @@ class BagReader(utils.Closing):
       self.file.seek(start, os.SEEK_SET)
       return self.file.read(end - start)
     else:
-      assert index.start >= 0 and index.stop >= 0 and index.step == 1, index
+      assert 0 <= index.start <= index.stop and index.step in (None, 1), index
       index = range(index.start, min(index.stop, self.length))
       if index.start == index.stop:
         return []

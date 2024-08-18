@@ -54,7 +54,7 @@ class TestDataset:
   @pytest.mark.parametrize('cache_index', (True, False))
   @pytest.mark.parametrize('cache_keys', ([], ['refs'], ['refs', 'foo']))
   @pytest.mark.parametrize('parallel', (True, False))
-  def test_slicing(self, tmpdir, cache_index, cache_keys, parallel):
+  def test_masking(self, tmpdir, cache_index, cache_keys, parallel):
     directory = pathlib.Path(tmpdir) / 'dataset'
     spec = {'foo': 'utf8', 'bar': 'int', 'baz': 'utf8[]'}
     with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
@@ -67,15 +67,37 @@ class TestDataset:
         parallel) as reader:
       assert reader[3, {}] == {}
       assert reader[3, {'foo': True}] == {'foo': 'hello world'}
-      with pytest.raises(TypeError):
+      with pytest.raises(Exception):
         assert reader[3, {'foo': 12}]
       assert reader[3, {'foo': True, 'baz': True}] == {
           'baz': ['word0', 'word1', 'word2'],
           'foo': 'hello world'}
       assert reader[3, {'baz': range(1)}] == {'baz': ['word0']}
       assert reader[3, {'baz': range(1, 10)}] == {'baz': ['word1', 'word2']}
-      with pytest.raises(TypeError):
+      with pytest.raises(Exception):
         assert reader[3, {'bar': range(1)}]
+
+  @pytest.mark.parametrize('cache_index', (True, False))
+  @pytest.mark.parametrize('cache_keys', ([], ['refs'], ['refs', 'foo']))
+  @pytest.mark.parametrize('parallel', (True, False))
+  def test_slicing(self, tmpdir, cache_index, cache_keys, parallel):
+    directory = pathlib.Path(tmpdir) / 'dataset'
+    spec = {'foo': 'utf8', 'bar': 'int'}
+    datapoints = [{'foo': 'hello world', 'bar': i} for i in range(10)]
+    with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
+      [writer.append(x) for x in datapoints]
+    with granular.DatasetReader(
+        directory, granular.decoders, cache_index, cache_keys,
+        parallel) as reader:
+      stacked = {k: [x[k] for x in datapoints] for k in datapoints[0]}
+      assert reader[0:10] == stacked
+      assert reader[2:5] == {k: v[2:5] for k, v in stacked.items()}
+      assert reader[2:3, {'foo': True}] == {'foo': ['hello world']}
+      assert reader[2:4, {'foo': True}] == {'foo': ['hello world'] * 2}
+      assert reader[2:4, {'bar': True}] == {
+          'bar': [datapoints[2]['bar'], datapoints[3]['bar']]}
+      with pytest.raises(Exception):
+        assert reader[2:4, {'bar': range(0, 1)}]
 
   @pytest.mark.parametrize('cache_index', (True, False))
   @pytest.mark.parametrize('cache_keys', ([], ['refs'], ['refs', 'baz']))

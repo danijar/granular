@@ -139,9 +139,10 @@ class DatasetReader(utils.Closing):
     return sum(x.size for x in self.readers.values())
 
   def available(self, index):
+    ref = self._getrefs(index, index + 1)[0]
     return {
         key: range(0, ref[1] if ref else 0) if dtype.endswith('[]') else True
-        for ref, (key, dtype) in zip(self._getref(index), self.spec.items())}
+        for ref, (key, dtype) in zip(ref, self.spec.items())}
 
   def __getstate__(self):
     d = self.__dict__.copy()
@@ -162,50 +163,43 @@ class DatasetReader(utils.Closing):
       index, mask = index
       assert isinstance(mask, dict), mask
     else:
-      mask = {k: True for k in self.spec.keys()}
+      mask = {k: True for k in self.spec}
     assert all(k in self.spec for k in mask), (self.spec, mask)
-    ref = self._getref(index)
-    requests = {}
-    for i, (key, dtype) in enumerate(self.spec.items()):
-      msk = mask.get(key, False)
-      if dtype.endswith('[]'):
+    needed = {}
+    if isinstance(index, int):
+      refs = self._getrefs(index, index + 1)[0]
+      for i, (key, dtype) in enumerate(self.spec.items()):
+        ref, msk = refs[i], mask.get(key, False)
         if msk is False:
           continue
-        if ref[i]:
-          start, length = ref[i]
-          avail = range(start, start + length)
+        elif dtype.endswith('[]'):
+          assert isinstance(msk, (bool, slice, range)), (key, msk, type(msk))
+          begin, end = (ref[0], ref[0] + ref[1]) if ref else (0, 0)
+          if msk is True:
+            needed[key] = range(begin, end)
+          else:
+            assert 0 <= msk.start <= msk.stop and msk.step in (None, 1), msk
+            needed[key] = range(begin + msk.start, min(begin + msk.stop, end))
         else:
-          avail = range(0)
-        if isinstance(msk, bool):
-          assert msk is True
-          requests[key] = avail
-        elif isinstance(msk, (slice, range)):
-          assert msk.start >= 0 and msk.stop >= 0 and msk.step == 1, msk
-          start = avail.start + msk.start
-          stop = min(avail.start + msk.stop, avail.stop)
-          requests[key] = range(start, stop)
-        else:
-          raise TypeError((msk, type(msk)))
-      else:
-        if not isinstance(msk, bool):
-          raise TypeError((key, mask))
-        if not msk:
-          continue
-        requests[key] = ref[i]
-    if self.workers:
-      reqs1 = {k: v for k, v in requests.items() if k not in self.cache_keys}
-      reqs2 = {k: v for k, v in requests.items() if k in self.cache_keys}
-      values1 = self.pool.map(
-          lambda it: self.readers[it[0]][it[1]], reqs1.items())
-      values2 = [self.readers[k][r] for k, r in reqs2.items()]
-      datapoint = dict(
-          list(zip(reqs1.keys(), values1)) +
-          list(zip(reqs2.keys(), values2)))
+          assert isinstance(msk, bool) and msk is True, (key, msk, type(msk))
+          needed[key] = ref
+      point = self._fetch(needed)
+      decoded = {k: self._decode(k, v, self.spec[k]) for k, v in point.items()}
     else:
-      datapoint = {k: self.readers[k][r] for k, r in requests.items()}
-    decoded = {
-        k: self._decode(k, v, self.spec[k])
-        for k, v in datapoint.items()}
+      assert 0 <= index.start <= index.stop and index.step in (None, 1), index
+      refs = self._getrefs(index.start, index.stop)
+      for i, (key, dtype) in enumerate(self.spec.items()):
+        # Cannot range read datapoints that contain sequence modalities,
+        # because they may not be consecutive and thus could be slow.
+        assert not dtype.endswith('[]'), (index, key, dtype)
+        ref, msk = [x[i] for x in refs], mask.get(key, False)
+        assert isinstance(msk, bool), (key, msk, type(msk))
+        if msk:
+          needed[key] = range(ref[0], ref[-1] + 1)
+      points = self._fetch(needed)
+      decoded = {
+          k: [self._decode(k, v, self.spec[k]) for v in vs]
+          for k, vs in points.items()}
     return decoded
 
   def copy(self):
@@ -218,16 +212,46 @@ class DatasetReader(utils.Closing):
       reader.close()
 
   @functools.lru_cache(maxsize=1)
-  def _getref(self, index):
-    ref = self.readers['refs'][index]
-    ref = msgpack.unpackb(ref)
-    assert len(ref) == len(self.spec)
-    for (key, dtype), r in zip(self.spec.items(), ref):
-      if dtype.endswith('[]'):
-        assert isinstance(r, list) and len(r) in (0, 2)
+  def _getrefs(self, start, stop):
+    assert 0 <= start <= stop <= len(self), (start, stop, len(self))
+    refs = self.readers['refs'][start: stop]
+    refs = [msgpack.unpackb(x) for x in refs]
+    assert len(refs) == stop - start
+    for ref in refs:
+      assert len(ref) == len(self.spec)
+      for (key, dtype), r in zip(self.spec.items(), ref):
+        if dtype.endswith('[]'):
+          assert isinstance(r, list) and len(r) in (0, 2)
+        else:
+          assert isinstance(r, int)
+    return refs
+
+  def _needed(self, key, dtype, ref, mask):
+    assert isinstance(mask, (bool, slice, range)), (mask, type(mask))
+    assert mask is not False, mask
+    if dtype.endswith('[]'):
+      begin, end = (ref[0], ref[0] + ref[1]) if ref else (0, 0)
+      if mask is True:
+        return range(begin, end)
       else:
-        assert isinstance(r, int)
-    return ref
+        assert 0 <= mask.start <= mask.stop and mask.step in (1, None), mask
+        return range(begin + mask.start, min(begin + mask.stop, end))
+    else:
+      return ref
+
+  def _fetch(self, needed):
+    if self.workers:
+      reqs1 = {k: v for k, v in needed.items() if k not in self.cache_keys}
+      reqs2 = {k: v for k, v in needed.items() if k in self.cache_keys}
+      values1 = self.pool.map(
+          lambda it: self.readers[it[0]][it[1]], reqs1.items())
+      values2 = [self.readers[k][r] for k, r in reqs2.items()]
+      datapoint = dict(
+          list(zip(reqs1.keys(), values1)) +
+          list(zip(reqs2.keys(), values2)))
+    else:
+      datapoint = {k: self.readers[k][r] for k, r in needed.items()}
+    return datapoint
 
   def _decode(self, key, value, dtype):
     decoder = self.decoders[key]
