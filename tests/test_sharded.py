@@ -136,3 +136,22 @@ class TestSharded:
         assert available == {'bar': True, 'baz': range(i), 'foo': True}
         datapoint = reader[i, available]
         assert datapoint == datapoints[i]
+
+  @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
+  def test_slicing(self, tmpdir, shardlen):
+    directory = pathlib.Path(tmpdir) / 'dataset'
+    spec = {'foo': 'utf8', 'bar': 'int'}
+    datapoints = [{'foo': 'hello world', 'bar': i} for i in range(10)]
+    with granular.ShardedDatasetWriter(
+        directory, spec, granular.encoders, shardlen) as writer:
+      [writer.append(x) for x in datapoints]
+    with granular.ShardedDatasetReader(directory, granular.decoders) as reader:
+      stacked = {k: [x[k] for x in datapoints] for k in datapoints[0]}
+      assert reader[0:10] == stacked
+      assert reader[2:5] == {k: v[2:5] for k, v in stacked.items()}
+      assert reader[2:3, {'foo': True}] == {'foo': ['hello world']}
+      assert reader[2:4, {'foo': True}] == {'foo': ['hello world'] * 2}
+      assert reader[2:4, {'bar': True}] == {
+          'bar': [datapoints[2]['bar'], datapoints[3]['bar']]}
+      with pytest.raises(Exception):
+        assert reader[2:4, {'bar': range(0, 1)}]

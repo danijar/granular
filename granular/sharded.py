@@ -121,8 +121,11 @@ class ShardedDatasetReader(utils.Closing):
     return len(self.readers)
 
   def available(self, index):
-    reader, local_index = self._resolve(index)
-    return reader.available(local_index)
+    assert isinstance(index, int), (index, type(index))
+    readers, local_indices = self._resolve(index, index + 1)
+    assert len(readers) == len(local_indices) == 1
+    assert local_indices[0].start == local_indices[0].stop - 1
+    return readers[0].available(local_indices[0].start)
 
   def __len__(self):
     return self.length
@@ -130,11 +133,21 @@ class ShardedDatasetReader(utils.Closing):
   def __getitem__(self, index):
     if isinstance(index, tuple):
       index, mask = index
-      reader, local_index = self._resolve(index)
-      return reader[local_index, mask]
     else:
-      reader, local_index = self._resolve(index)
-      return reader[local_index]
+      index, mask = index, {k: True for k in self.spec}
+    if isinstance(index, int):
+      readers, local_indices = self._resolve(index, index + 1)
+      assert len(readers) == len(local_indices) == 1
+      return readers[0][local_indices[0][0], mask]
+    else:
+      # We could parallelize this, but typically the requested slice touches
+      # only either one or two shards. A thread pool would make it harder to
+      # control the maximum number of concurrent connections.
+      assert index.step in (None, 0), index
+      results = []
+      for reader, local_index in zip(*self._resolve(index.start, index.stop)):
+        results.append(reader[local_index, mask])
+      return {k: sum([v[k] for v in results], []) for k in results[0]}
 
   def copy(self):
     return pickle.loads(pickle.dumps(self))
@@ -143,10 +156,18 @@ class ShardedDatasetReader(utils.Closing):
     for reader in self.readers:
       reader.close()
 
-  def _resolve(self, index):
-    if not (0 <= index <= self.length):
-      raise IndexError(index)
-    for reader, start, stop in zip(self.readers, self.starts, self.stops):
-      if start <= index < stop:
-        local_index = index - start
-        return reader, local_index
+  def _resolve(self, start, stop):
+    assert 0 <= start <= stop <= len(self), (start, stop, len(self))
+    readers, local_indices = [], []
+    for reader, left, right in zip(self.readers, self.starts, self.stops):
+      if not (start < right):
+        continue
+      elif stop <= right:
+        readers.append(reader)
+        local_indices.append(range(start - left, stop - left))
+        break
+      else:
+        readers.append(reader)
+        local_indices.append(range(start - left, right - left))
+        start = right
+    return readers, local_indices
