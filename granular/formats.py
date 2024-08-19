@@ -5,15 +5,16 @@ import msgpack
 import numpy as np
 
 
-def encode_int(value, size=None, endian='little'):
+def encode_int(value, size=None, signed=True, endian='little'):
   if size is None:
     size = np.ceil(np.log2(1 + value) / 8)
-  return value.to_bytes(int(size), endian)
+  return value.to_bytes(int(size), endian, signed=signed)
 
 
-def decode_int(buffer, size=None, endian='little'):
+def decode_int(buffer, size=None, signed=True, endian='little'):
+  assert size is None or len(buffer) == size, (len(buffer), size)
   assert len(buffer) <= 16, len(buffer)
-  return int.from_bytes(buffer, endian)
+  return int.from_bytes(buffer, endian, signed=signed)
 
 
 def encode_array(value):
@@ -102,6 +103,8 @@ encoders = {
     'utf8': lambda x: x.encode('utf-8'),
     'msgpack': msgpack.packb,
     'int': encode_int,
+    'i64': bind(encode_int, size=8, signed=True),
+    'u64': bind(encode_int, size=8, signed=False),
     'array': encode_array,
     'tree': encode_tree,
     'jpg': bind(encode_image, format='jpg'),
@@ -116,6 +119,8 @@ decoders = {
     'utf8': lambda x: x.decode('utf-8'),
     'msgpack': msgpack.unpackb,
     'int': decode_int,
+    'i64': bind(decode_int, size=8, signed=True),
+    'u64': bind(decode_int, size=8, signed=False),
     'array': decode_array,
     'tree': decode_tree,
     'jpg': decode_image,

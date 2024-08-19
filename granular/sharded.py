@@ -143,7 +143,7 @@ class ShardedDatasetReader(utils.Closing):
       # We could parallelize this, but typically the requested slice touches
       # only either one or two shards. A thread pool would make it harder to
       # control the maximum number of concurrent connections.
-      assert index.step in (None, 0), index
+      assert index.step in (None, 1), index
       results = []
       for reader, local_index in zip(*self._resolve(index.start, index.stop)):
         results.append(reader[local_index, mask])
