@@ -164,7 +164,7 @@ class Loader:
         self.received.add(result)
       except queue.Empty:
         pass
-      needed = self.consumed + collected
+      needed = self.consumed + collected * self.num_shards
       if needed in self.received:
         self.received.remove(needed)
         collected += 1
