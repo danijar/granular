@@ -1,6 +1,5 @@
 import concurrent.futures
 import itertools
-import json
 import operator
 import pathlib
 import pickle
@@ -67,12 +66,6 @@ class ShardedDatasetWriter(utils.Closing):
     return len(self) - 1
 
   def flush(self):
-    if not self.specwritten:
-      self.specwritten = True
-      content = json.dumps(self.spec).encode('utf-8')
-      with (self.directory / 'spec.json').open('wb') as f:
-        f.write(content)
-    self.refwriter.flush()
     for writer in self.writers.values():
       writer.flush()
 
