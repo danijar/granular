@@ -32,8 +32,8 @@ class Loader:
     self.seed = seed
 
     self.length = len(source)
-    self.step = 0
-    self.consumed = 0
+    self.step = shard_id
+    self.consumed = shard_id
     self.futures = collections.deque()
     self.batches = collections.deque()
     self.recycle_after = int(recycle_after)
