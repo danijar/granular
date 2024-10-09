@@ -19,7 +19,7 @@ class Loader:
 
   def __init__(
       self, source, batch, fns=(), shuffle=True,
-      prefetch=10, workers=32, recycle_after=False,
+      prefetch=8, workers=32, recycle_after=False,
       shard_id=0, num_shards=1, mp=None, seed=0):
 
     self.source = source
@@ -32,11 +32,11 @@ class Loader:
     self.seed = seed
 
     self.length = len(source)
-    self.step = shard_id
-    self.consumed = shard_id
+    self.step = 0
+    self.consumed = 0
     self.futures = collections.deque()
     self.batches = collections.deque()
-    self.recycle_after = int(recycle_after)
+    self.recycle_after = recycle_after
     self.recycle_queue = collections.deque()
 
     self.mp = mp or multiprocessing.get_context('spawn')
@@ -107,9 +107,11 @@ class Loader:
       q.close()
       q.cancel_join_thread()
       q.join_thread()
-    for batch in self.batches:
-      [x.close() for x in batch.values()]
+    for batch in list(self.batches) + list(self.recycle_queue):
+      for buffer in batch.values():
+        buffer.close()
     self.batches.clear()
+    self.recycle_queue.clear()
 
   @classmethod
   def _worker(cls, stop, iqueue, oqueue, source, fns, seed):
@@ -140,7 +142,7 @@ class Loader:
       stop.set()
 
   def _request(self):
-    if len(self.recycle_queue) > self.recycle_after:
+    if self.recycle_after and len(self.recycle_queue) > self.recycle_after:
       batch = self.recycle_queue.popleft()
     else:
       batch = {
@@ -148,9 +150,10 @@ class Loader:
           for k, (d, s) in self.spec.items()}
     self.batches.append(batch)
     for loc in range(self.batch):
-      epoch = self.step // self.length
-      index = self._order(epoch, self.seed)[self.step % self.length]
-      self.iqueue.put((index, self.step, batch, loc))
+      local_step = self.step + self.shard_id
+      epoch = local_step // self.length
+      index = self._order(epoch, self.seed)[local_step % self.length]
+      self.iqueue.put((index, local_step, batch, loc))
       self.step += self.num_shards
 
   def _receive(self):
@@ -164,7 +167,7 @@ class Loader:
         self.received.add(result)
       except queue.Empty:
         pass
-      needed = self.consumed + collected * self.num_shards
+      needed = self.consumed + self.shard_id + collected * self.num_shards
       if needed in self.received:
         self.received.remove(needed)
         collected += 1
@@ -202,18 +205,39 @@ class SharedArray:
     return self.arr
 
   def result(self):
-    weakref.finalize(self.arr, self.close)
-    return self.arr
+    # We cannot use self.close as finalizer because that would keep self alive
+    # and thus the reference count for self.shm would never reach zero.
+    weakref.finalize(self.arr, self.shm.unlink)
+    arr = self.arr
+    self.arr = None  # Prevent future usage
+    return arr
 
   def close(self):
-    self.arr = None
-    try:
-      self.shm.unlink()
-    except FileNotFoundError:
-      pass
+    self.arr = None  # Prevent future usage
+    self.shm.unlink()
 
   def __getstate__(self):
     return (self.arr.shape, self.arr.dtype.str, self.shm.name)
 
   def __setstate__(self, args):
     self.__init__(*args)
+
+
+if __name__ == '__main__':
+  import psutil
+  process = psutil.Process()
+  gb = 1024 ** 3
+  source = [{'foo': np.zeros(gb, np.uint8)}]
+  loader = Loader(
+      source, batch=2, prefetch=2, workers=4,
+      # recycle_after=2,
+  )
+  for i, batch in enumerate(loader):
+    time.sleep(1)
+    info = process.memory_info()
+    print(
+        f'step={i}',
+        f'rss={info.rss / gb:.2f}',
+        f'vms={info.vms / gb:.2f}',
+        f'shm={info.shared / gb:.2f}',
+    )

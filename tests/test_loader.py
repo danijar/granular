@@ -39,7 +39,7 @@ class TestLoader:
     source = granular.DatasetReader(directory, granular.decoders)
     dataset = iter(granular.Loader(
         source, batch, shuffle=False, workers=4, recycle_after=recycle_after))
-    for i in range(0, 2 * len(datapoints), batch):
+    for i in range(0, 6 * len(datapoints), batch):
       data = next(dataset)
       assert set(data.keys()) == {'foo', 'bar'}
       assert data['foo'].shape == (batch,)
