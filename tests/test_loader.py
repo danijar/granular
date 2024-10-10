@@ -157,6 +157,51 @@ class TestLoader:
     dataset.close()
     source.close()
 
+  @pytest.mark.parametrize('length', (2, 10))
+  @pytest.mark.parametrize('num_shards', (1, 2, 3))
+  @pytest.mark.parametrize('local_batch', (1, 3, 6))
+  def test_sharded(self, length, num_shards, local_batch):
+    global_batch = local_batch * num_shards
+    source = [{'foo': i} for i in range(length)]
+    loaders = []
+    for shard_id in range(num_shards):
+      loaders.append(granular.Loader(
+          source, local_batch, shuffle=False, workers=2,
+          shard_id=shard_id, num_shards=num_shards))
+    step = 0
+    for _, batches in zip(range(12), zip(*loaders)):
+      actual = np.concatenate([x['foo'] for x in batches])
+      should = np.arange(step, step + global_batch) % length
+      assert actual.shape == should.shape and np.all(actual == should)
+      step += global_batch
+    [x.close() for x in loaders]
+
+  @pytest.mark.parametrize('num_shards', (2, 3))
+  @pytest.mark.parametrize('local_batch', (1, 2, 12))
+  def test_sharded_checkpoint(self, num_shards, local_batch, length=10):
+    global_batch = local_batch * num_shards
+    source = [{'foo': i} for i in range(length)]
+    step = 0
+    make = lambda i: granular.Loader(
+        source, local_batch, shuffle=False, workers=2,
+        shard_id=i, num_shards=num_shards)
+    loaders = [make(i) for i in range(num_shards)]
+    for _, batches in zip(range(12), zip(*loaders)):
+      actual = np.concatenate([x['foo'] for x in batches])
+      should = np.arange(step, step + global_batch) % length
+      assert actual.shape == should.shape and np.all(actual == should)
+      step += global_batch
+    states = [x.save() for x in loaders]
+    [x.close() for x in loaders]
+    loaders = [make(i) for i in range(num_shards)]
+    [x.load(s) for x, s in zip(loaders, states)]
+    for _, batches in zip(range(12), zip(*loaders)):
+      actual = np.concatenate([x['foo'] for x in batches])
+      should = np.arange(step, step + global_batch) % length
+      assert actual.shape == should.shape and np.all(actual == should)
+      step += global_batch
+    [x.close() for x in loaders]
+
 
 def fill1(args):
   target, i = args
