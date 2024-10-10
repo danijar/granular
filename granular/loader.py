@@ -150,11 +150,11 @@ class Loader:
           for k, (d, s) in self.spec.items()}
     self.batches.append(batch)
     for loc in range(self.batch):
-      local_step = self.step + self.shard_id
+      local_step = self.step + self.shard_id * self.batch + loc
       epoch = local_step // self.length
       index = self._order(epoch, self.seed)[local_step % self.length]
       self.iqueue.put((index, local_step, batch, loc))
-      self.step += self.num_shards
+    self.step += self.num_shards * self.batch
 
   def _receive(self):
     collected = 0
@@ -167,7 +167,7 @@ class Loader:
         self.received.add(result)
       except queue.Empty:
         pass
-      needed = self.consumed + self.shard_id + collected * self.num_shards
+      needed = self.consumed + self.shard_id * self.batch + collected
       if needed in self.received:
         self.received.remove(needed)
         collected += 1
