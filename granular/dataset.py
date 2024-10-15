@@ -190,13 +190,14 @@ class DatasetReader(utils.Closing):
       assert 0 <= index.start <= index.stop and index.step in (None, 1), index
       refs = self._getrefs(index.start, index.stop)
       for i, (key, dtype) in enumerate(self.spec.items()):
+        ref, msk = [x[i] for x in refs], mask.get(key, False)
         # Cannot range read datapoints that contain sequence modalities,
         # because they may not be consecutive and thus could be slow.
-        assert not dtype.endswith('[]'), (index, key, dtype)
-        ref, msk = [x[i] for x in refs], mask.get(key, False)
         assert isinstance(msk, bool), (key, msk, type(msk))
-        if msk:
-          needed[key] = range(ref[0], ref[-1] + 1)
+        assert not (msk and dtype.endswith('[]')), (index, key, dtype)
+        if not msk:
+          continue
+        needed[key] = range(ref[0], ref[-1] + 1)
       points = self._fetch(needed)
       decoded = {
           k: [self._decode(k, v, self.spec[k]) for v in vs]
