@@ -86,6 +86,7 @@ class DatasetWriter(utils.Closing):
       writer.flush()
 
   def close(self):
+    self.flush()
     self.refwriter.close()
     for writer in self.writers.values():
       writer.close()

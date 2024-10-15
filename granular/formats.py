@@ -7,8 +7,8 @@ import numpy as np
 
 def encode_int(value, size=None, signed=True, endian='little'):
   if size is None:
-    size = np.ceil(np.log2(1 + value) / 8)
-  return value.to_bytes(int(size), endian, signed=signed)
+    size = int(np.ceil(np.log2(1 + value) / 8))
+  return value.to_bytes(max(1, int(size)), endian, signed=signed)
 
 
 def decode_int(buffer, size=None, signed=True, endian='little'):

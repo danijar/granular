@@ -8,5 +8,9 @@ class Closing:
     return self
 
   def __exit__(self, *e):
-    self.close()
+    try:
+      self.close()
+    except Exception:
+      if not e[0]:
+        raise
     self.closed = True

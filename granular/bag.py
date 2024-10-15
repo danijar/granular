@@ -1,15 +1,21 @@
+import errno
 import io
 import os
 import pathlib
 import pickle
+import struct
 from multiprocessing import shared_memory
 
 from . import utils
 
 
+limst = struct.Struct('<Q')
+
+
 class BagWriter(utils.Closing):
 
-  def __init__(self, filepath):
+  def __init__(self, filepath, version=2):
+    assert version in (1, 2), version
     super().__init__()
     if isinstance(filepath, str):
       filepath = pathlib.Path(filepath)
@@ -17,6 +23,11 @@ class BagWriter(utils.Closing):
     file = filepath.open('wb')
     assert isinstance(file, io.BufferedIOBase), type(file)
     assert file.writable(), file
+    # Version 1 stores the starts and ends of all blobs, resulting in N+1
+    # entries in the limits table, where the first entry is zero.
+    # Version 2 stores only the ends of all blobs, resulting in N entries in
+    # the limits table.
+    self.version = version
     self.file = file
     self.offset = 0
     self.length = 0
@@ -25,24 +36,30 @@ class BagWriter(utils.Closing):
 
   @property
   def size(self):
-    return self.offset + 8 * self.length + 8
+    return self.offset + 8 * self.length + (8 if self.version == 1 else 0)
 
   def __len__(self):
     return self.length
 
   def append(self, record, flush=True):
+    assert len(record), 'zero byte record'
     assert not self.closed
     assert self.length < 2 ** 32 - 1, self.length
     assert isinstance(record, bytes), type(record)
     index = self.length
     self.length += 1
-    self.limits.append(self.offset)
-    self.offset += len(record)
+    if self.version == 1:
+      self.limits.append(self.offset)
+      self.offset += len(record)
+    if self.version == 2:
+      self.offset += len(record)
+      self.limits.append(self.offset)
     self.towrite.append(record)
     flush and self.flush()
     return index
 
   def flush(self):
+    assert not self.closed
     if not self.towrite:
       return
     if len(self.towrite) == 1:
@@ -53,8 +70,9 @@ class BagWriter(utils.Closing):
 
   def close(self):
     assert not self.closed
-    self.limits.append(self.offset)
-    self.towrite.extend(tuple(x.to_bytes(8, 'little') for x in self.limits))
+    if self.version == 1:
+      self.limits.append(self.offset)
+    self.towrite.extend(limst.pack(x) for x in self.limits)
     self.flush()
     self.file.close()
 
@@ -75,13 +93,29 @@ class BagReader(utils.Closing):
     self.source = source
     self.fp = None
     assert self.file.readable(), self.file
-    self.file.seek(-8, os.SEEK_END)
-    self.filesize = self.file.tell() + 8
-    self.recordend = int.from_bytes(self.file.read(8), 'little')
-    self.length = (self.filesize - 8 - self.recordend) // 8
-    if cache_index:
-      self.file.seek(self.recordend, os.SEEK_SET)
-      limits = self.file.read(8 * self.length + 8)
+    try:
+      self.file.seek(-8, os.SEEK_END)
+      empty = False
+    except OSError as e:
+      if e.errno != errno.EINVAL:
+        raise
+      empty = True
+    if empty:
+      self.filesize = 0
+      self.indexstart = 0
+      self.length = 0
+    else:
+      self.filesize = self.file.tell() + 8
+      self.indexstart = limst.unpack(self.file.read(8))[0]
+      # If the index table starts with a zero, we are reading a version 1 file
+      # and we can skip the initial entry.
+      self.file.seek(self.indexstart, os.SEEK_SET)
+      if limst.unpack(self.file.read(8))[0] == 0:
+        self.indexstart += 8
+      self.length = (self.filesize - self.indexstart) // 8
+    if cache_index and self.length:
+      self.file.seek(self.indexstart, os.SEEK_SET)
+      limits = self.file.read(self.filesize - self.indexstart)
       self.limits = SharedBuffer(limits)
     else:
       self.limits = None
@@ -96,7 +130,7 @@ class BagReader(utils.Closing):
     return {
         'source': self.source,
         'filesize': self.filesize,
-        'recordend': self.recordend,
+        'indexstart': self.indexstart,
         'length': self.length,
         'limits': self.limits,
     }
@@ -104,7 +138,7 @@ class BagReader(utils.Closing):
   def __setstate__(self, d):
     self.source = d['source']
     self.filesize = d['filesize']
-    self.recordend = d['recordend']
+    self.indexstart = d['indexstart']
     self.length = d['length']
     self.limits = d['limits']
     self.closed = False
@@ -121,24 +155,20 @@ class BagReader(utils.Closing):
     assert not self.closed
     assert isinstance(index, (int, slice, range)), (index, type(index))
     if isinstance(index, int):
-      start = self._get_start(index)
-      if index + 1 < self.length:
-        end = self._get_start(index + 1)
-      else:
-        end = self.recordend
-      self.file.seek(start, os.SEEK_SET)
-      return self.file.read(end - start)
+      lhs, rhs = self._getlims(index, index + 1)
+      self.file.seek(lhs, os.SEEK_SET)
+      return self.file.read(rhs - lhs)
     else:
       assert 0 <= index.start <= index.stop and index.step in (None, 1), index
       index = range(index.start, min(index.stop, self.length))
       if index.start == index.stop:
         return []
-      limits = self._get_limits(index.start, index.stop + 1)
-      start, stop = limits[0], limits[-1]
-      self.file.seek(start, os.SEEK_SET)
-      buffer = self.file.read(stop - start)
+      limits = self._getlims(index.start, index.stop)
+      lhs, rhs = limits[0], limits[-1]
+      self.file.seek(lhs, os.SEEK_SET)
+      buffer = self.file.read(rhs - lhs)
       records = [
-          buffer[i - start: j - start]
+          buffer[i - lhs: j - lhs]
           for i, j in zip(limits[:-1], limits[1:])]
       return records
 
@@ -154,27 +184,19 @@ class BagReader(utils.Closing):
     if isinstance(self.source, SharedBuffer):
       self.source.close()
 
-  def _get_start(self, index):
+  def _getlims(self, start, stop):
+    assert start < stop, (start, stop)
+    lhs = 8 * max(0, start - 1)
+    rhs = 8 * stop
     if self.limits:
-      return int.from_bytes(self.limits[8 * index: 8 * (index + 1)], 'little')
+      buffer = self.limits[lhs: rhs]
     else:
-      self.file.seek(-8 * (self.length - index) - 8, os.SEEK_END)
-      offset = self.file.read(8)
-      offset = int.from_bytes(offset, 'little')
-      return offset
-
-  def _get_limits(self, start, stop):
-    if self.limits:
-      return [
-          int.from_bytes(self.limits[8 * i: 8 * (i + 1)], 'little')
-          for i in range(start, stop)]
-    else:
-      self.file.seek(-8 * (self.length - start) - 8, os.SEEK_END)
-      limits = self.file.read(8 * (stop - start))
-      limits = [
-          int.from_bytes(limits[8 * i: 8 * (i + 1)], 'little')
-          for i in range(stop - start)]
-      return limits
+      self.file.seek(self.indexstart + lhs, os.SEEK_SET)
+      buffer = self.file.read(rhs - lhs)
+    limits = [
+        limst.unpack(buffer[i: i + 8])[0]
+        for i in range(0, len(buffer), 8)]
+    return limits if start else (0, *limits)
 
 
 class SharedBuffer:
