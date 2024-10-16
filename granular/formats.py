@@ -73,7 +73,7 @@ def encode_video(array, fps=20, format='mp4', codec='h264'):
   T, H, W = array.shape[:3]
   fp = io.BytesIO()
   output = av.open(fp, mode='w', format=format)
-  stream = output.add_stream(codec, rate=float(fps))
+  stream = output.add_stream(codec, rate=fps)
   stream.width = W
   stream.height = H
   stream.pix_fmt = 'yuv420p'
