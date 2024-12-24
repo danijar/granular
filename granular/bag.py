@@ -21,7 +21,7 @@ class BagWriter(utils.Closing):
       filepath = pathlib.Path(filepath)
     assert not filepath.exists(), filepath
     file = filepath.open('wb')
-    assert isinstance(file, io.BufferedIOBase), type(file)
+    assert isinstance(file, io.IOBase), type(file)
     assert file.writable(), file
     # Version 1 stores the starts and ends of all blobs, resulting in N+1
     # entries in the limits table, where the first entry is zero.
