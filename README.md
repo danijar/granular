@@ -79,8 +79,10 @@ Loading
 def preproc(datapoint, seed):
   return {'image': datapoint['abc'], 'label': datapoint['foo']}
 
-loader = granular.Loader(
-    reader, batch=8, fns=[preproc], shuffle=True, workers=64, seed=0)
+source = granular.sources.Epochs(reader, shuffle=True, seed=0)
+source = granular.sources.Transform(source, preproc)
+
+loader = granular.Loader(source, batch=8, workers=64)
 
 print(loader.spec)
 # {'image': (np.uint8, (60, 80, 3)), 'label': (np.int64, ())}

@@ -16,8 +16,9 @@ class TestLoader:
     datapoints = [{'foo': i, 'bar': np.ones((3, 3))} for i in range(10)]
     with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
       [writer.append(x) for x in datapoints]
-    source = granular.DatasetReader(directory, granular.decoders)
-    dataset = iter(granular.Loader(source, batch, shuffle=False, workers=4))
+    reader = granular.DatasetReader(directory, granular.decoders)
+    source = granular.sources.Epochs(reader, shuffle=False)
+    dataset = iter(granular.Loader(source, batch, workers=4))
     for i in range(0, 2 * len(datapoints), batch):
       data = next(dataset)
       assert set(data.keys()) == {'foo', 'bar'}
@@ -27,7 +28,7 @@ class TestLoader:
           np.arange(i, i + batch) % len(datapoints))).all()
       assert (data['bar'] == np.ones((batch, 3, 3))).all()
     dataset.close()
-    source.close()
+    reader.close()
 
   @pytest.mark.parametrize('recycle_after', (False, 1, 2))
   def test_recycle(self, tmpdir, recycle_after, batch=3):
@@ -36,9 +37,10 @@ class TestLoader:
     datapoints = [{'foo': i, 'bar': np.ones((3, 3))} for i in range(10)]
     with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
       [writer.append(x) for x in datapoints]
-    source = granular.DatasetReader(directory, granular.decoders)
+    reader = granular.DatasetReader(directory, granular.decoders)
+    source = granular.sources.Epochs(reader, shuffle=False)
     dataset = iter(granular.Loader(
-        source, batch, shuffle=False, workers=4, recycle_after=recycle_after))
+        source, batch, workers=4, recycle_after=recycle_after))
     for i in range(0, 6 * len(datapoints), batch):
       data = next(dataset)
       assert set(data.keys()) == {'foo', 'bar'}
@@ -48,7 +50,7 @@ class TestLoader:
           np.arange(i, i + batch) % len(datapoints))).all()
       assert (data['bar'] == np.ones((batch, 3, 3))).all()
     dataset.close()
-    source.close()
+    reader.close()
 
   @pytest.mark.parametrize('batch', (1, 3))
   def test_shuffled(self, tmpdir, batch):
@@ -57,8 +59,9 @@ class TestLoader:
     datapoints = [{'foo': i, 'bar': np.ones((3, 3))} for i in range(10)]
     with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
       [writer.append(x) for x in datapoints]
-    source = granular.DatasetReader(directory, granular.decoders)
-    dataset = iter(granular.Loader(source, batch, shuffle=True, workers=4))
+    reader = granular.DatasetReader(directory, granular.decoders)
+    source = granular.sources.Epochs(reader, shuffle=True)
+    dataset = iter(granular.Loader(source, batch, workers=4))
     seen = set()
     for i in range(0, len(datapoints), batch):
       data = next(dataset)
@@ -69,7 +72,7 @@ class TestLoader:
       else:
         seen.clear()
     dataset.close()
-    source.close()
+    reader.close()
 
   @pytest.mark.parametrize('kwargs', (
       dict(cache_index=False, cache_keys=[], parallel=False),
@@ -81,8 +84,9 @@ class TestLoader:
     datapoints = [{'foo': i, 'bar': np.ones((3, 3))} for i in range(10)]
     with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
       [writer.append(x) for x in datapoints]
-    source = granular.DatasetReader(directory, granular.decoders, **kwargs)
-    dataset = iter(granular.Loader(source, batch, shuffle=True, workers=4))
+    reader = granular.DatasetReader(directory, granular.decoders, **kwargs)
+    source = granular.sources.Epochs(reader, shuffle=True)
+    dataset = iter(granular.Loader(source, batch, workers=4))
     seen = set()
     for i in range(0, len(datapoints), batch):
       data = next(dataset)
@@ -93,7 +97,7 @@ class TestLoader:
       else:
         seen.clear()
     dataset.close()
-    source.close()
+    reader.close()
 
   def test_shared_array_pool(self):
     import granular.loader
@@ -132,18 +136,21 @@ class TestLoader:
     datapoints = [{'foo': i} for i in range(10)]
     with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
       [writer.append(x) for x in datapoints]
+    reader = granular.DatasetReader(directory, granular.decoders)
+    source = granular.sources.Epochs(reader, shuffle=False)
+    dataset = iter(granular.Loader(source, batch, workers=4))
     source = granular.DatasetReader(directory, granular.decoders)
-    dataset = iter(granular.Loader(source, batch, shuffle=False, workers=4))
     for i in range(0, 2 * batch, batch):
       assert np.all(next(dataset)['foo'] == np.arange(i, i + batch) % 10)
     assert dataset.consumed == 2 * batch
     state = dataset.save()
     dataset.close()
-    source.close()
+    reader.close()
     del dataset
     del source
-    source = granular.DatasetReader(directory, granular.decoders)
-    dataset = granular.Loader(source, batch, shuffle=False, workers=4)
+    reader = granular.DatasetReader(directory, granular.decoders)
+    source = granular.sources.Epochs(reader, shuffle=False)
+    dataset = granular.Loader(source, batch, workers=4)
     if running:
       dataset = iter(dataset)
       dataset.load(state)
@@ -155,7 +162,7 @@ class TestLoader:
       assert np.all(next(dataset)['foo'] == np.arange(i, i + batch) % 10)
     assert dataset.consumed == 6 * batch
     dataset.close()
-    source.close()
+    reader.close()
 
   @pytest.mark.parametrize('length', (2, 10))
   @pytest.mark.parametrize('num_shards', (1, 2, 3))
@@ -163,10 +170,11 @@ class TestLoader:
   def test_sharded(self, length, num_shards, local_batch):
     global_batch = local_batch * num_shards
     source = [{'foo': i} for i in range(length)]
+    source = granular.sources.Epochs(source, shuffle=False)
     loaders = []
     for shard_id in range(num_shards):
       loaders.append(granular.Loader(
-          source, local_batch, shuffle=False, workers=2,
+          source, local_batch, workers=2,
           shard_id=shard_id, num_shards=num_shards))
     step = 0
     for _, batches in zip(range(12), zip(*loaders)):
@@ -181,9 +189,10 @@ class TestLoader:
   def test_sharded_checkpoint(self, num_shards, local_batch, length=10):
     global_batch = local_batch * num_shards
     source = [{'foo': i} for i in range(length)]
+    source = granular.sources.Epochs(source, shuffle=False)
     step = 0
     make = lambda i: granular.Loader(
-        source, local_batch, shuffle=False, workers=2,
+        source, local_batch, workers=2,
         shard_id=i, num_shards=num_shards)
     loaders = [make(i) for i in range(num_shards)]
     for _, batches in zip(range(12), zip(*loaders)):

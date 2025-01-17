@@ -12,26 +12,33 @@ import weakref
 from multiprocessing import shared_memory
 
 import numpy as np
-import cloudpickle
 
 
 class Loader:
 
   def __init__(
-      self, source, batch, fns=(), shuffle=True,
+      self, source, batch, fns=(), shuffle=None,
       prefetch=8, workers=32, recycle_after=False,
-      shard_id=0, num_shards=1, mp=None, seed=0):
+      shard_id=0, num_shards=1, mp=None):
+
+    assert shuffle is None, (
+        'Shuffling has been removed from the Loader. Shuffle the source that '
+        'before passing it into the Loader instead:\n'
+        'source = granular.sources.Epochs(source, shuffle=True, seed=0)')
+    del shuffle
+
+    assert fns == (), (
+        'Transformations have been removed from the Loader. Transform the '
+        'source before passing it into the loader instead:\n'
+        'source = granular.sources.Transform(source, fn=..., seed=0).')
+    del fns
 
     self.source = source
-    self.fns = fns
     self.batch = batch
-    self.shuffle = shuffle
     self.prefetch = prefetch
     self.shard_id = shard_id
     self.num_shards = num_shards
-    self.seed = seed
 
-    self.length = len(source)
     self.step = 0
     self.consumed = 0
     self.futures = collections.deque()
@@ -47,19 +54,15 @@ class Loader:
     self.received = set()
 
     self.workers = []
-    fns = cloudpickle.dumps(fns)
-    args = (self.stop, self.iqueue, self.oqueue, source, fns, seed)
+    args = (self.stop, self.iqueue, self.oqueue, source)
     for _ in range(workers):
       self.workers.append(self.mp.Process(target=self._worker, args=args))
     atexit.register(self.close)
 
   @functools.cached_property
   def spec(self):
-    datapoint = self.source[0]
+    datapoint = self.source(0)
     datapoint = {k: np.asarray(v) for k, v in datapoint.items()}
-    for fn in self.fns:
-      datapoint = fn(datapoint, seed=[0, 0])
-      assert isinstance(datapoint, dict), fn
     return {k: (v.dtype, v.shape) for k, v in datapoint.items()}
 
   def __iter__(self):
@@ -81,14 +84,13 @@ class Loader:
     return batch
 
   def save(self):
-    return {'step': self.consumed, 'seed': self.seed}
+    return {'step': self.consumed}
 
   def load(self, d):
     if self.started:
       for _ in range(self.prefetch):
         self._receive()
     self.consumed = self.step = d['step']
-    self.seed = d['seed']
     if self.started:
       for _ in range(self.prefetch):
         self._request()
@@ -114,20 +116,17 @@ class Loader:
     self.recycle_queue.clear()
 
   @classmethod
-  def _worker(cls, stop, iqueue, oqueue, source, fns, seed):
+  def _worker(cls, stop, iqueue, oqueue, source):
     try:
-      fns = cloudpickle.loads(fns)
       while not stop.is_set():
         try:
           job = iqueue.get(timeout=0.1)
         except queue.Empty:
           continue
-        index, step, batch, loc = job
-        datapoint = source[index]
+        step, batch, loc = job
+        datapoint = source(step)
+        assert isinstance(datapoint, dict)
         datapoint = {k: np.asarray(v) for k, v in datapoint.items()}
-        for fn in fns:
-          datapoint = fn(datapoint, seed=[seed, step])
-          assert isinstance(datapoint, dict), fn
         assert datapoint.keys() == batch.keys()
         for key, value in datapoint.items():
           batch[key].array[loc] = value
@@ -151,9 +150,7 @@ class Loader:
     self.batches.append(batch)
     for loc in range(self.batch):
       local_step = self.step + self.shard_id * self.batch + loc
-      epoch = local_step // self.length
-      index = self._order(epoch, self.seed)[local_step % self.length]
-      self.iqueue.put((index, local_step, batch, loc))
+      self.iqueue.put((local_step, batch, loc))
     self.step += self.num_shards * self.batch
 
   def _receive(self):
@@ -179,14 +176,6 @@ class Loader:
       batch = {k: v.result() for k, v in batch.items()}
     self.consumed += self.batch * self.num_shards
     return batch
-
-  @functools.lru_cache(maxsize=1)
-  def _order(self, epoch, seed):
-    if self.shuffle:
-      rng = np.random.default_rng(seed=[seed, epoch])
-      return rng.permutation(np.arange(self.length)).tolist()
-    else:
-      return list(range(self.length))
 
 
 class SharedArray:

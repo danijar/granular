@@ -1,4 +1,4 @@
-__version__ = '0.20.3'
+__version__ = '0.21.0'
 
 from .bag import BagWriter
 from .bag import BagReader
@@ -13,3 +13,5 @@ from .formats import encoders
 from .formats import decoders
 
 from .loader import Loader
+
+from . import sources
