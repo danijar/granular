@@ -6,8 +6,9 @@ import numpy as np
 
 
 def encode_int(value, size=None, signed=True, endian='little'):
+  assert signed or value >= 0
   if size is None:
-    size = int(np.ceil(np.log2(1 + value) / 8))
+    size = int(np.ceil((np.log2(1 + abs(value)) + signed) / 8))
   return value.to_bytes(max(1, int(size)), endian, signed=signed)
 
 
