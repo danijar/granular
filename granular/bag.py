@@ -205,8 +205,11 @@ class SharedBuffer:
 
   def __init__(self, content):
     if self.ENABLE:
-      self.shm = shared_memory.SharedMemory(create=True, size=len(content))
-      self.shm.buf[:] = memoryview(content)
+      self.size = len(content)
+      self.shm = shared_memory.SharedMemory(create=True, size=self.size)
+      # The slice range is needed on MacOS where SharedMemory buffers can be
+      # larger than requested.
+      self.shm.buf[:self.size] = memoryview(content)
       self.buf = self.shm.buf
     else:
       self.buf = bytes(content)
@@ -216,20 +219,22 @@ class SharedBuffer:
 
   def __getstate__(self):
     if self.ENABLE:
-      return self.shm.name
+      return (self.shm.name, self.size)
     else:
       return self.buf
 
   def __setstate__(self, value):
     if self.ENABLE:
-      self.shm = shared_memory.SharedMemory(name=value)
+      name, size = value
+      self.shm = shared_memory.SharedMemory(name=name)
       self.buf = self.shm.buf
+      self.size = size
     else:
       self.buf = value
 
   def open(self, mode='rb'):
     assert mode in ('rb', 'wb'), mode
-    return io.BytesIO(self.buf)
+    return io.BytesIO(self.buf[:self.size])
 
   def close(self):
     self.buf = None

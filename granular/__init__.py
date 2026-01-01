@@ -1,5 +1,3 @@
-__version__ = '0.21.0'
-
 from .bag import BagWriter
 from .bag import BagReader
 
