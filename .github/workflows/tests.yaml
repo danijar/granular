@@ -18,7 +18,7 @@ jobs:
     - name: Dependencies
       run: uv sync
     - name: Tests
-      run: uv run --extra dev --extra formats pytest
+      run: uv run --group dev --extra formats pytest
     - name: Build
       run: uv build
     - name: PyPi

@@ -6,96 +6,102 @@ import numpy as np
 
 
 def encode_int(value, size=None, signed=True, endian='little'):
-  if size is None:
-    size = int(np.ceil(np.log2(1 + value) / 8))
-  return value.to_bytes(max(1, int(size)), endian, signed=signed)
+    if size is None:
+        size = int(np.ceil(np.log2(1 + value) / 8))
+    return value.to_bytes(max(1, int(size)), endian, signed=signed)
 
 
 def decode_int(buffer, size=None, signed=True, endian='little'):
-  assert size is None or len(buffer) == size, (len(buffer), size)
-  assert len(buffer) <= 16, len(buffer)
-  return int.from_bytes(buffer, endian, signed=signed)
+    assert size is None or len(buffer) == size, (len(buffer), size)
+    assert len(buffer) <= 16, len(buffer)
+    return int.from_bytes(buffer, endian, signed=signed)
 
 
 def encode_array(value):
-  assert value.data.c_contiguous
-  return msgpack.packb((value.dtype.str, value.shape, value.data))
+    assert value.data.c_contiguous
+    return msgpack.packb((value.dtype.str, value.shape, value.data))
 
 
 def decode_array(buffer):
-  dtype, shape, data = msgpack.unpackb(buffer)
-  return np.frombuffer(data, dtype).reshape(shape)
+    dtype, shape, data = msgpack.unpackb(buffer)
+    return np.frombuffer(data, dtype).reshape(shape)
 
 
 def encode_tree(value):
-  def fn(xs):
-    if isinstance(xs, (list, tuple)):
-      return [fn(x) for x in xs]
-    elif isinstance(xs, dict):
-      return {k: fn(v) for k, v in xs.items()}
-    elif isinstance(xs, np.ndarray):
-      assert xs.data.c_contiguous
-      return ('_', xs.dtype.str, xs.shape, xs.data)
-    else:
-      return xs
-  return msgpack.packb(fn(value))
+    def fn(xs):
+        if isinstance(xs, (list, tuple)):
+            return [fn(x) for x in xs]
+        elif isinstance(xs, dict):
+            return {k: fn(v) for k, v in xs.items()}
+        elif isinstance(xs, np.ndarray):
+            assert xs.data.c_contiguous
+            return ('_', xs.dtype.str, xs.shape, xs.data)
+        else:
+            return xs
+
+    return msgpack.packb(fn(value))
 
 
 def decode_tree(buffer):
-  def fn(xs):
-    if isinstance(xs, list) and len(xs) == 4 and xs[0] == '_':
-      _, dtype, shape, data = xs
-      return np.frombuffer(data, dtype).reshape(shape)
-    elif isinstance(xs, (list, tuple)):
-      return [fn(x) for x in xs]
-    elif isinstance(xs, dict):
-      return {k: fn(v) for k, v in xs.items()}
-    else:
-      return xs
-  return fn(msgpack.unpackb(buffer))
+    def fn(xs):
+        if isinstance(xs, list) and len(xs) == 4 and xs[0] == '_':
+            _, dtype, shape, data = xs
+            return np.frombuffer(data, dtype).reshape(shape)
+        elif isinstance(xs, (list, tuple)):
+            return [fn(x) for x in xs]
+        elif isinstance(xs, dict):
+            return {k: fn(v) for k, v in xs.items()}
+        else:
+            return xs
+
+    return fn(msgpack.unpackb(buffer))
 
 
 def encode_image(value, quality=100, format='jpg'):
-  format = ('jpeg' if format == 'jpg' else format).upper()
-  from PIL import Image
-  stream = io.BytesIO()
-  Image.fromarray(value).save(stream, format=format)
-  return stream.getvalue()
+    format = ('jpeg' if format == 'jpg' else format).upper()
+    from PIL import Image
+
+    stream = io.BytesIO()
+    Image.fromarray(value).save(stream, format=format)
+    return stream.getvalue()
 
 
 def decode_image(buffer, *args):
-  from PIL import Image
-  return np.asarray(Image.open(io.BytesIO(buffer)))
+    from PIL import Image
+
+    return np.asarray(Image.open(io.BytesIO(buffer)))
 
 
 def encode_video(array, fps=20, format='mp4', codec='h264'):
-  import av
-  T, H, W = array.shape[:3]
-  fp = io.BytesIO()
-  output = av.open(fp, mode='w', format=format)
-  stream = output.add_stream(codec, rate=fps)
-  stream.width = W
-  stream.height = H
-  stream.pix_fmt = 'yuv420p'
-  for t in range(T):
-    frame = av.VideoFrame.from_ndarray(array[t], format='rgb24')
-    frame.pts = t
-    output.mux(stream.encode(frame))
-  output.mux(stream.encode(None))
-  output.close()
-  return fp.getvalue()
+    import av
+
+    T, H, W = array.shape[:3]
+    fp = io.BytesIO()
+    output = av.open(fp, mode='w', format=format)
+    stream = output.add_stream(codec, rate=fps)
+    stream.width = W
+    stream.height = H
+    stream.pix_fmt = 'yuv420p'
+    for t in range(T):
+        frame = av.VideoFrame.from_ndarray(array[t], format='rgb24')
+        frame.pts = t
+        output.mux(stream.encode(frame))
+    output.mux(stream.encode(None))
+    output.close()
+    return fp.getvalue()
 
 
 def decode_video(buffer, *args):
-  import numpy as np
-  import av
-  container = av.open(io.BytesIO(buffer))
-  array = []
-  for frame in container.decode(video=0):
-    array.append(frame.to_ndarray(format='rgb24'))
-  array = np.stack(array)
-  container.close()
-  return array
+    import numpy as np
+    import av
+
+    container = av.open(io.BytesIO(buffer))
+    array = []
+    for frame in container.decode(video=0):
+        array.append(frame.to_ndarray(format='rgb24'))
+    array = np.stack(array)
+    container.close()
+    return array
 
 
 encoders = {

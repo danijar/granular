@@ -1,6 +1,6 @@
 [project]
 name = "granular"
-version = "0.21.1"
+version = "0.21.2"
 description = "Fast format for datasets"
 readme="README.md"
 license="MIT"
@@ -24,9 +24,13 @@ formats = [
   "av",
   "pillow",
 ]
+
+[dependency-groups]
 dev = [
   "ipdb",
+  "neovim",
   "pytest",
+  "ruff",
   "ruff",
   "twine",
 ]
@@ -38,7 +42,10 @@ build-backend = "uv_build"
 [tool.uv.build-backend]
 module-root = "."
 
-[tool.pytest.ini_options]
-addopts = ["--strict-config", "-ra"]
-pythonpath = ["."]
-testpaths = ["tests"]
+[tool.ruff]
+line-length = 79
+indent-width = 4
+
+[tool.ruff.format]
+indent-style = "space"
+quote-style = "single"
