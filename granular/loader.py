@@ -19,8 +19,6 @@ class Loader:
         self,
         source,
         batch,
-        fns=(),
-        shuffle=None,
         prefetch=8,
         workers=32,
         recycle_after=False,
@@ -28,20 +26,6 @@ class Loader:
         num_shards=1,
         mp=None,
     ):
-        assert shuffle is None, (
-            'Shuffling has been removed from the Loader. Shuffle the source that '
-            'before passing it into the Loader instead:\n'
-            'source = granular.sources.Epochs(source, shuffle=True, seed=0)'
-        )
-        del shuffle
-
-        assert fns == (), (
-            'Transformations have been removed from the Loader. Transform the '
-            'source before passing it into the loader instead:\n'
-            'source = granular.sources.Transform(source, fn=..., seed=0).'
-        )
-        del fns
-
         self.source = source
         self.batch = batch
         self.prefetch = prefetch

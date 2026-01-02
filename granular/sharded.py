@@ -125,25 +125,18 @@ class ShardedDatasetReader(utils.Closing):
     def shards(self):
         return len(self.readers)
 
-    def available(self, index):
-        assert isinstance(index, int), (index, type(index))
-        readers, local_indices = self._resolve(index, index + 1)
-        assert len(readers) == len(local_indices) == 1
-        assert local_indices[0].start == local_indices[0].stop - 1
-        return readers[0].available(local_indices[0].start)
-
     def __len__(self):
         return self.length
 
     def __getitem__(self, index):
         if isinstance(index, tuple):
-            index, mask = index
+            index, keys = index
         else:
-            index, mask = index, {k: True for k in self.spec}
+            keys = tuple(self.spec.keys())
         if isinstance(index, int):
             readers, local_indices = self._resolve(index, index + 1)
             assert len(readers) == len(local_indices) == 1
-            return readers[0][local_indices[0][0], mask]
+            return readers[0][local_indices[0][0], keys]
         else:
             # We could parallelize this, but typically the requested slice
             # touches only either one or two shards. A thread pool would make
@@ -153,7 +146,7 @@ class ShardedDatasetReader(utils.Closing):
             results = []
             resolved = self._resolve(index.start, index.stop)
             for reader, local_index in zip(*resolved):
-                results.append(reader[local_index, mask])
+                results.append(reader[local_index, keys])
             return {k: sum([v[k] for v in results], []) for k in results[0]}
 
     def copy(self):

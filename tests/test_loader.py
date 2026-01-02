@@ -88,7 +88,7 @@ class TestLoader:
         'kwargs',
         (
             dict(cache_index=False, cache_keys=[], parallel=False),
-            dict(cache_index=True, cache_keys=['refs'], parallel=True),
+            dict(cache_index=True, cache_keys=['foo'], parallel=True),
         ),
     )
     def test_reader_options(self, tmpdir, kwargs, batch=3):

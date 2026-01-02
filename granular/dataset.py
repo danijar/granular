@@ -1,11 +1,8 @@
 import concurrent.futures
-import functools
 import json
 import pathlib
 import pickle
 import re
-
-import msgpack
 
 from . import utils
 from . import bag
@@ -15,7 +12,7 @@ class DatasetWriter(utils.Closing):
     def __init__(self, directory, spec, encoders):
         super().__init__()
         assert all(re.match(r'^[a-z_]', k) for k in spec.keys()), spec
-        assert all(re.match(r'^[a-z_](\[\])?', v) for v in spec.values()), spec
+        assert all(re.match(r'^[a-z_]', v) for v in spec.values()), spec
         if isinstance(directory, str):
             directory = pathlib.Path(directory)
         assert not directory.exists(), directory
@@ -24,16 +21,16 @@ class DatasetWriter(utils.Closing):
         if encoders is None:
             encoders = {k: None for k in spec.keys()}
         else:
-            encoders = {k: encoders[v.rstrip('[]')] for k, v in spec.items()}
+            encoders = {k: encoders[v] for k, v in spec.items()}
         self.directory = directory
         self.encoders = encoders
         self.thespec = spec
-        self.refwriter = bag.BagWriter(self.directory / 'refs.bag')
         self.writers = {
             k: bag.BagWriter(self.directory / f'{k}.bag')
             for k in self.spec.keys()
         }
         self.specwritten = False
+        self.length = 0
 
     @property
     def spec(self):
@@ -41,10 +38,10 @@ class DatasetWriter(utils.Closing):
 
     @property
     def size(self):
-        return sum(x.size for x in self.writers.values()) + self.refwriter.size
+        return sum(x.size for x in self.writers.values())
 
     def __len__(self):
-        return len(self.refwriter)
+        return self.length
 
     def append(self, datapoint, flush=True):
         assert isinstance(datapoint, dict)
@@ -52,28 +49,13 @@ class DatasetWriter(utils.Closing):
             datapoint.keys(),
             self.spec,
         )
-        refs = []
-        # Iterate in sorted key order.
         for key, dtype in self.spec.items():
             writer = self.writers[key]
-            if dtype.endswith('[]'):
-                # Hold only one value of the generator in memory at a time.
-                indices = []
-                for value in datapoint[key]:
-                    value = self._encode(key, value, dtype)
-                    index = writer.append(value, flush=False)
-                    indices.append(index)
-                if indices:
-                    refs.append([indices[0], len(indices)])
-                else:
-                    refs.append([])
-            else:
-                value = datapoint[key]
-                value = self._encode(key, value, dtype)
-                index = writer.append(value, flush=False)
-                refs.append(index)
-        refs = msgpack.packb(refs)
-        index = self.refwriter.append(refs, flush=False)
+            value = datapoint[key]
+            value = self._encode(key, value, dtype)
+            writer.append(value, flush=False)
+        index = self.length
+        self.length += 1
         flush and self.flush()
         return index
 
@@ -83,13 +65,11 @@ class DatasetWriter(utils.Closing):
             content = json.dumps(self.spec).encode('utf-8')
             with (self.directory / 'spec.json').open('wb') as f:
                 f.write(content)
-        self.refwriter.flush()
         for writer in self.writers.values():
             writer.flush()
 
     def close(self):
         self.flush()
-        self.refwriter.close()
         for writer in self.writers.values():
             writer.close()
 
@@ -122,21 +102,22 @@ class DatasetReader(utils.Closing):
         with (directory / 'spec.json').open('rb') as f:
             self.thespec = json.loads(f.read())
         info = (self.thespec, cache_keys)
-        assert all(k in self.thespec or k == 'refs' for k in cache_keys), info
+        assert all(k in self.thespec for k in cache_keys), info
         self.readers = {
             k: bag.BagReader(
                 directory / f'{k}.bag',
-                cache_index,
+                cache_index=cache_index,
                 cache_data=(k in cache_keys),
             )
-            for k in ('refs', *self.spec.keys())
+            for k in self.spec.keys()
         }
+        lengths = {k: len(v) for k, v in self.readers.items()}
+        assert len(set(lengths.values())) == 1, (directory, lengths)
+        self.length, = set(lengths.values())
         if decoders is None:
             decoders = {k: None for k in self.spec.keys()}
         else:
-            decoders = {
-                k: decoders[v.rstrip('[]')] for k, v in self.spec.items()
-            }
+            decoders = {k: decoders[v] for k, v in self.spec.items()}
         self.decoders = decoders
         self.cache_keys = cache_keys
         self.workers = int(parallel and len(set(self.spec) - set(cache_keys)))
@@ -151,15 +132,6 @@ class DatasetReader(utils.Closing):
     def size(self):
         return sum(x.size for x in self.readers.values())
 
-    def available(self, index):
-        ref = self._getrefs(index, index + 1)[0]
-        return {
-            key: range(0, ref[1] if ref else 0)
-            if dtype.endswith('[]')
-            else True
-            for ref, (key, dtype) in zip(ref, self.spec.items())
-        }
-
     def __getstate__(self):
         d = self.__dict__.copy()
         if self.workers:
@@ -172,56 +144,26 @@ class DatasetReader(utils.Closing):
             self.pool = concurrent.futures.ThreadPoolExecutor(self.workers)
 
     def __len__(self):
-        return len(self.readers['refs'])
+        return self.length
 
     def __getitem__(self, index):
         if isinstance(index, tuple):
-            index, mask = index
-            assert isinstance(mask, dict), mask
+            index, keys = index
+            if isinstance(keys, list):
+                keys = tuple(keys)
+            assert isinstance(keys, tuple), keys
         else:
-            mask = {k: True for k in self.spec}
-        assert all(k in self.spec for k in mask), (self.spec, mask)
-        needed = {}
+            keys = tuple(self.spec.keys())
+        assert all(k in self.spec for k in keys), (self.spec, keys)
         if isinstance(index, int):
-            refs = self._getrefs(index, index + 1)[0]
-            for i, (key, dtype) in enumerate(self.spec.items()):
-                ref, msk = refs[i], mask.get(key, False)
-                if msk is False:
-                    continue
-                elif dtype.endswith('[]'):
-                    typs = (bool, slice, range)
-                    assert isinstance(msk, typs), (key, msk, type(msk))
-                    begin, end = (ref[0], ref[0] + ref[1]) if ref else (0, 0)
-                    if msk is True:
-                        needed[key] = range(begin, end)
-                    else:
-                        m = msk
-                        assert 0 <= m.start <= m.stop and m.step in (None, 1)
-                        needed[key] = range(
-                            begin + msk.start, min(begin + msk.stop, end)
-                        )
-                else:
-                    m = msk
-                    assert isinstance(m, bool) and m is True, (key, m, type(m))
-                    needed[key] = ref
-            point = self._fetch(needed)
+            point = self._fetch(keys, index)
             decoded = {
                 k: self._decode(k, v, self.spec[k]) for k, v in point.items()
             }
         else:
             i = index
             assert 0 <= i.start <= i.stop and i.step in (None, 1), i
-            refs = self._getrefs(index.start, index.stop)
-            for i, (key, dtype) in enumerate(self.spec.items()):
-                ref, msk = [x[i] for x in refs], mask.get(key, False)
-                # Cannot range read datapoints that contain sequence modalities,
-                # because they may not be consecutive and thus could be slow.
-                assert isinstance(msk, bool), (key, msk, type(msk))
-                assert not (msk and dtype.endswith('[]')), (index, key, dtype)
-                if not msk:
-                    continue
-                needed[key] = range(ref[0], ref[-1] + 1)
-            points = self._fetch(needed)
+            points = self._fetch(keys, index)
             decoded = {
                 k: [self._decode(k, v, self.spec[k]) for v in vs]
                 for k, vs in points.items()
@@ -237,50 +179,17 @@ class DatasetReader(utils.Closing):
         for reader in self.readers.values():
             reader.close()
 
-    @functools.lru_cache(maxsize=1)
-    def _getrefs(self, start, stop):
-        assert 0 <= start <= stop <= len(self), (start, stop, len(self))
-        refs = self.readers['refs'][start:stop]
-        refs = [msgpack.unpackb(x) for x in refs]
-        assert len(refs) == stop - start
-        for ref in refs:
-            assert len(ref) == len(self.spec)
-            for (key, dtype), r in zip(self.spec.items(), ref):
-                if dtype.endswith('[]'):
-                    assert isinstance(r, list) and len(r) in (0, 2)
-                else:
-                    assert isinstance(r, int)
-        return refs
-
-    def _needed(self, key, dtype, ref, mask):
-        assert isinstance(mask, (bool, slice, range)), (mask, type(mask))
-        assert mask is not False, mask
-        if dtype.endswith('[]'):
-            begin, end = (ref[0], ref[0] + ref[1]) if ref else (0, 0)
-            if mask is True:
-                return range(begin, end)
-            else:
-                m = mask
-                assert 0 <= m.start <= m.stop and m.step in (1, None), m
-                return range(begin + mask.start, min(begin + mask.stop, end))
-        else:
-            return ref
-
-    def _fetch(self, needed):
+    def _fetch(self, keys, index):
         if self.workers:
             cached = lambda k: k in self.cache_keys
-            reqs1 = {k: v for k, v in needed.items() if not cached(k)}
-            reqs2 = {k: v for k, v in needed.items() if cached(k)}
-            fn = lambda it: self.readers[it[0]][it[1]]
-            values1 = self.pool.map(fn, reqs1.items())
-            values2 = [self.readers[k][r] for k, r in reqs2.items()]
-            datapoint = [
-                *zip(reqs1.keys(), values1),
-                *zip(reqs2.keys(), values2),
-            ]
-            datapoint = dict(datapoint)
+            reqs1 = [k for k in keys if not cached(k)]
+            reqs2 = [k for k in keys if cached(k)]
+            fn = lambda k: self.readers[k][index]
+            values1 = self.pool.map(fn, reqs1)
+            values2 = [self.readers[k][index] for k in reqs2]
+            datapoint = dict([*zip(reqs1, values1), *zip(reqs2, values2)])
         else:
-            datapoint = {k: self.readers[k][r] for k, r in needed.items()}
+            datapoint = {k: self.readers[k][index] for k in keys}
         return datapoint
 
     def _decode(self, key, value, dtype):

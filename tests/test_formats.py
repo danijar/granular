@@ -10,9 +10,9 @@ class TestFormats:
         spec = {
             'a': 'utf8',
             'b': 'int',
-            'c': 'utf8[]',
+            'c': 'utf8',
             'd': 'msgpack',
-            'e': 'int[]',
+            'e': 'int',
             'f': 'bytes',
             'g': 'array',
             'h': 'jpg',
@@ -26,9 +26,9 @@ class TestFormats:
                 {
                     'a': 'hello world',
                     'b': i,
-                    'c': [f'word{j}' for j in range(i)],
+                    'c': f'word{i}',
                     'd': {'foo': 'bar', 'baz': 12},
-                    'e': list(range(i)),
+                    'e': i,
                     'f': b'hello world',
                     'g': np.ones((10, 4), np.float32),
                     'h': np.zeros((320, 180, 3), np.uint8),

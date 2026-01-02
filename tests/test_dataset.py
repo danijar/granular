@@ -9,14 +9,13 @@ import pytest
 class TestDataset:
     def test_writer(self, tmpdir):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'foo': 'utf8', 'bar': 'int', 'baz': 'utf8[]'}
+        spec = {'foo': 'utf8', 'bar': 'int', 'baz': 'utf8'}
         with granular.DatasetWriter(
             directory, spec, granular.encoders
         ) as writer:
             for i in range(10):
-                baz = [f'word{j}' for j in range(i)]
                 index = writer.append(
-                    {'foo': 'hello world', 'bar': i, 'baz': baz}
+                    {'foo': 'hello world', 'bar': i, 'baz': f'word{i}'}
                 )
                 assert index == i
                 assert len(writer) == i + 1
@@ -24,7 +23,6 @@ class TestDataset:
             assert writer.size > 0
         assert set(x.name for x in directory.glob('*')) == {
             'spec.json',
-            'refs.bag',
             'foo.bag',
             'bar.bag',
             'baz.bag',
@@ -39,23 +37,21 @@ class TestDataset:
         'cache_keys',
         (
             [],
-            ['refs'],
-            ['refs', 'foo'],
+            ['foo'],
             ['foo', 'bar'],
-            ['refs', 'foo', 'bar', 'baz'],
+            ['foo', 'bar', 'baz'],
         ),
     )
     @pytest.mark.parametrize('parallel', (True, False))
     def test_roundtrip(self, tmpdir, cache_index, cache_keys, parallel):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
+        spec = {'bar': 'int', 'baz': 'utf8', 'foo': 'utf8'}
         datapoints = []
         with granular.DatasetWriter(
             directory, spec, granular.encoders
         ) as writer:
             for i in range(10):
-                baz = [f'word{j}' for j in range(i)]
-                datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+                datapoint = {'foo': 'hello world', 'bar': i, 'baz': f'word{i}'}
                 writer.append(datapoint)
                 datapoints.append(datapoint)
             size = writer.size
@@ -69,38 +65,29 @@ class TestDataset:
                 assert datapoint == datapoints[i]
 
     @pytest.mark.parametrize('cache_index', (True, False))
-    @pytest.mark.parametrize('cache_keys', ([], ['refs'], ['refs', 'foo']))
+    @pytest.mark.parametrize('cache_keys', ([], ['foo'], ['foo', 'bar']))
     @pytest.mark.parametrize('parallel', (True, False))
     def test_masking(self, tmpdir, cache_index, cache_keys, parallel):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'foo': 'utf8', 'bar': 'int', 'baz': 'utf8[]'}
+        spec = {'foo': 'utf8', 'bar': 'int', 'baz': 'utf8'}
         with granular.DatasetWriter(
             directory, spec, granular.encoders
         ) as writer:
             for i in range(10):
-                baz = [f'word{j}' for j in range(i)]
-                datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+                datapoint = {'foo': 'hello world', 'bar': i, 'baz': f'word{i}'}
                 writer.append(datapoint)
         with granular.DatasetReader(
             directory, granular.decoders, cache_index, cache_keys, parallel
         ) as reader:
-            assert reader[3, {}] == {}
-            assert reader[3, {'foo': True}] == {'foo': 'hello world'}
-            with pytest.raises(Exception):
-                assert reader[3, {'foo': 12}]
-            assert reader[3, {'foo': True, 'baz': True}] == {
-                'baz': ['word0', 'word1', 'word2'],
+            assert reader[3, ()] == {}
+            assert reader[3, ('foo',)] == {'foo': 'hello world'}
+            assert reader[3, ('foo', 'baz')] == {
+                'baz': 'word3',
                 'foo': 'hello world',
             }
-            assert reader[3, {'baz': range(1)}] == {'baz': ['word0']}
-            assert reader[3, {'baz': range(1, 10)}] == {
-                'baz': ['word1', 'word2']
-            }
-            with pytest.raises(Exception):
-                assert reader[3, {'bar': range(1)}]
 
     @pytest.mark.parametrize('cache_index', (True, False))
-    @pytest.mark.parametrize('cache_keys', ([], ['refs'], ['refs', 'foo']))
+    @pytest.mark.parametrize('cache_keys', ([], ['foo'], ['foo', 'bar']))
     @pytest.mark.parametrize('parallel', (True, False))
     def test_slicing(self, tmpdir, cache_index, cache_keys, parallel):
         directory = pathlib.Path(tmpdir) / 'dataset'
@@ -116,51 +103,24 @@ class TestDataset:
             stacked = {k: [x[k] for x in datapoints] for k in datapoints[0]}
             assert reader[0:10] == stacked
             assert reader[2:5] == {k: v[2:5] for k, v in stacked.items()}
-            assert reader[2:3, {'foo': True}] == {'foo': ['hello world']}
-            assert reader[2:4, {'foo': True}] == {'foo': ['hello world'] * 2}
-            assert reader[2:4, {'bar': True}] == {
+            assert reader[2:3, ('foo',)] == {'foo': ['hello world']}
+            assert reader[2:4, ('foo',)] == {'foo': ['hello world'] * 2}
+            assert reader[2:4, ('bar',)] == {
                 'bar': [datapoints[2]['bar'], datapoints[3]['bar']]
             }
-            with pytest.raises(Exception):
-                assert reader[2:4, {'bar': range(0, 1)}]
 
     @pytest.mark.parametrize('cache_index', (True, False))
-    @pytest.mark.parametrize('cache_keys', ([], ['refs'], ['refs', 'baz']))
-    def test_available(self, tmpdir, cache_index, cache_keys):
-        directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
-        datapoints = []
-        with granular.DatasetWriter(
-            directory, spec, granular.encoders
-        ) as writer:
-            for i in range(10):
-                baz = [str(j) for j in range(i)]
-                datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
-                writer.append(datapoint)
-                datapoints.append(datapoint)
-        reader = granular.DatasetReader(
-            directory, granular.decoders, cache_index, cache_keys
-        )
-        with reader:
-            for i in range(10):
-                available = reader.available(i)
-                assert available == {'bar': True, 'baz': range(i), 'foo': True}
-                datapoint = reader[i, available]
-                assert datapoint == datapoints[i]
-
-    @pytest.mark.parametrize('cache_index', (True, False))
-    @pytest.mark.parametrize('cache_keys', ([], ['refs'], ['refs', 'baz']))
+    @pytest.mark.parametrize('cache_keys', ([], ['foo'], ['foo', 'baz']))
     @pytest.mark.parametrize('parallel', (True, False))
     def test_pickle(self, tmpdir, cache_index, cache_keys, parallel):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
+        spec = {'bar': 'int', 'baz': 'utf8', 'foo': 'utf8'}
         datapoints = []
         with granular.DatasetWriter(
             directory, spec, granular.encoders
         ) as writer:
             for i in range(10):
-                baz = [f'word{j}' for j in range(i)]
-                datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+                datapoint = {'foo': 'hello world', 'bar': i, 'baz': f'word{i}'}
                 writer.append(datapoint)
                 datapoints.append(datapoint)
             size = writer.size
@@ -178,14 +138,13 @@ class TestDataset:
 
     def test_parallel_exit(self, tmpdir):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
+        spec = {'bar': 'int', 'baz': 'utf8', 'foo': 'utf8'}
         datapoints = []
         with granular.DatasetWriter(
             directory, spec, granular.encoders
         ) as writer:
             for i in range(10):
-                baz = [f'word{j}' for j in range(i)]
-                datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+                datapoint = {'foo': 'hello world', 'bar': i, 'baz': f'word{i}'}
                 writer.append(datapoint)
                 datapoints.append(datapoint)
             size = writer.size

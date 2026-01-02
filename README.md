@@ -13,11 +13,15 @@ pip install granular
 
 [bag]: ...
 
+**NOTE:** The API and file format have changed in version 0.22.0. Pin
+`granular<=0.21.2` to continue using the [previous version][previous].
+
+[previous]: https://github.com/danijar/granular/tree/087bc1c529aa7716bdf56d1a0edf0175ab983325
+
 ## Features
 
 - 🚀 **Performance:** High read and write throughput locally and on Cloud.
 - 🔎 **Seeking:** Fast random access from disk by datapoint index.
-- 🎞️ **Sequences:** Datapoints can contain seekable lists of modalities.
 - 🤸 **Flexibility:** User provides encoders and decoders; examples available.
 - 👥 **Sharding:** Store datasets into shards to split processing workloads.
 - 🔄 **Determinism:** Deterministic and resumable global shuffling per epoch.
@@ -38,7 +42,7 @@ Writing
 ```python
 spec = {
     'foo': 'int',      # integer
-    'bar': 'utf8[]',   # *list* of strings
+    'bar': 'utf8',     # string
     'baz': 'msgpack',  # packed structure
     'abc': 'jpg',      # image
     'xyz': 'array',    # array
@@ -48,7 +52,7 @@ with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
   for i in range(10):
     datapoint = {
         'foo': i,
-        'bar': ['hello'] * i,
+        'bar': 'hello',
         'baz': {'a': 1},
         'abc': np.zeros((60, 80, 3), np.uint8),
         'xyz': np.arange(0, 1 + i, np.float32),
@@ -56,20 +60,20 @@ with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
     writer.append(datapoint)
 
 print(list(directory.glob('*')))
-# ['spec.json', 'refs.bag', 'foo.bag', 'bar.bag', 'baz.bag', 'abc.bag', 'xyz.bag']
+# ['spec.json', 'foo.bag', 'bar.bag', 'baz.bag', 'abc.bag', 'xyz.bag']
 ```
 
 Reading
 
 ```python
 with granular.DatasetReader(directory, granular.decoders) as reader:
-  print(reader.spec)    # {'foo': 'int', 'bar': 'utf8[]', 'baz': 'msgpack', ...}
+  print(reader.spec)    # {'foo': 'int', 'bar': 'utf8', 'baz': 'msgpack', ...}
   print(reader.size)    # Dataset size in bytes
   print(len(reader))    # Number of datapoints
 
   datapoint = reader[2]
   print(datapoint['foo'])        # 2
-  print(datapoint['bar'])        # ['hello', 'hello']
+  print(datapoint['bar'])        # 'hello'
   print(datapoint['abc'].shape)  # (60, 80, 3)
 ```
 
@@ -154,11 +158,9 @@ loader.load(state)
 
 ### Caching
 
-Retriving a datapoint requires first reading from `refs.bag` to find the
-references into the other bag files, and then reading from each of the modality
-bag files. If some of the modalities are small enough, they can be cached in
-RAM by setting `cache_keys`. In general, it is recommended to cache `refs` as
-well as all small modalities, such as integer labels.
+If some keys have small enough values, they can be cached in RAM by setting
+`cache_keys`. It is recommended to cache all small values, such as integer
+labels.
 
 Additionally, reading from a Bag file requires two read operations. The first
 operation looks at the index table at the end of the file to locate the byte
@@ -169,63 +171,26 @@ tables take up `8 * len(spec) * len(reader)` bytes of RAM.
 ```python
 reader = granular.DatasetReader(
     directory, decoders,
-    cache_index=True,            # Cache index tables of all bag files in memory.
-    cache_keys=('refs', 'foo'),  # Fully cache refs.bag and foo.bag in memory.
+    cache_index=True,     # Cache index tables of all bag files in memory.
+    cache_keys=('foo',),  # Fully cache foo.bag in memory.
 )
 ```
 
-### Masking
+### Columns
 
 It is possible to load the values of only a subset of keys of a datapoint. For
-this, provide a mask in addition to the datapoint index. This reduces the
-number of read requests to only the bag files that are actually needed:
+this, provide a tuple of keys in addition to the datapoint index. This reduces
+the number of read requests to only the bag files that are actually needed:
 
 ```python
 print(reader.spec)  # {'foo': 'int', 'bar': 'utf8', 'baz': 'array'}
 
-mask = {'foo': True, 'baz': True}
-datapoint = reader[index, mask]
+keys = ('foo', 'baz')
+datapoint = reader[index, keys]
 print('foo' in datapoint)  # True
 print('bar' in datapoint)  # False
 print('baz' in datapoint)  # True
 ```
-
-### Sequences
-
-Each dataset is a list of datapoints. Each datapoint is a dictionary with
-string keys and either individual byte values or lists of byte values. To use
-sequence values, add the `[]` suffix to the type in the `spec`:
-
-```python
-spec = {
-    'title': 'utf8',
-    'frames': 'jpg[]',
-    'captions': 'utf8[]',
-    'times': 'int[]',
-}
-```
-
-Sequence fields can not only store values of variable length, but also allow
-reading ranges of the value without loading the whole sequence from disk using
-masking:
-
-```python
-available = reader.available(index)
-print(available)
-# {'title': True, 'frames': range(54), 'captions': range(7), 'times': range(7)}
-
-mask = {
-    'title': True,            # Read the title modality
-    'frames': range(32, 42),  # Read a range of 10 frames.
-    'captions': range(0, 7),  # Read all captions.
-    'times': True,            # Another way to read the full list.
-}
-datapoint = reader[index, mask]
-print(len(datapoint['frames']))  # 10
-```
-
-Ranges are loaded using a single read operation, corresponding to a single
-download request on Cloud infrastructure.
 
 ### Sharding
 
@@ -252,13 +217,11 @@ $ tree ./directory
 .
 ├── 000000
 │  ├── spec.json
-│  ├── refs.bag
 │  ├── foo.bag
 │  ├── bar.bag
 │  └── baz.bag
 ├── 000001
 │  ├── spec.json
-│  ├── refs.bag
 │  ├── foo.bag
 │  ├── bar.bag
 │  └── baz.bag

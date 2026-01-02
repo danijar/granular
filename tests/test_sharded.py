@@ -9,14 +9,13 @@ class TestSharded:
     @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
     def test_writer(self, tmpdir, shardlen):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
+        spec = {'bar': 'int', 'baz': 'utf8', 'foo': 'utf8'}
         with granular.ShardedDatasetWriter(
             directory, spec, granular.encoders, shardlen
         ) as writer:
             assert writer.spec == spec
             for i in range(10):
-                baz = [f'word{j}' for j in range(i)]
-                datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+                datapoint = {'foo': 'hello world', 'bar': i, 'baz': f'word{i}'}
                 writer.append(datapoint)
             if shardlen:
                 assert writer.shards == int(np.ceil(10 / shardlen))
@@ -28,7 +27,6 @@ class TestSharded:
         for folder in directory.glob('*'):
             assert set(x.name for x in folder.glob('*')) == {
                 'spec.json',
-                'refs.bag',
                 'bar.bag',
                 'baz.bag',
                 'foo.bag',
@@ -37,13 +35,12 @@ class TestSharded:
     @pytest.mark.parametrize('shardlen', (None, 1, 5))
     def test_length(self, tmpdir, shardlen):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
+        spec = {'bar': 'int', 'baz': 'utf8', 'foo': 'utf8'}
         with granular.ShardedDatasetWriter(
             directory, spec, granular.encoders, shardlen
         ) as writer:
             for i in range(10):
-                baz = [f'word{j}' for j in range(i)]
-                datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+                datapoint = {'foo': 'hello world', 'bar': i, 'baz': f'word{i}'}
                 writer.append(datapoint)
             if shardlen:
                 assert writer.shards == int(np.ceil(10 / shardlen))
@@ -54,15 +51,14 @@ class TestSharded:
     @pytest.mark.parametrize('parallel', (True, False))
     def test_roundtrip(self, tmpdir, shardlen, parallel):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
+        spec = {'bar': 'int', 'baz': 'utf8', 'foo': 'utf8'}
         datapoints = []
         with granular.ShardedDatasetWriter(
             directory, spec, granular.encoders, shardlen
         ) as writer:
             assert writer.spec == spec
             for i in range(10):
-                baz = [f'word{j}' for j in range(i)]
-                datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
+                datapoint = {'foo': 'hello world', 'bar': i, 'baz': f'word{i}'}
                 writer.append(datapoint)
                 datapoints.append(datapoint)
             shards = writer.shards
@@ -81,8 +77,8 @@ class TestSharded:
     @pytest.mark.parametrize('nworkers', (1, 2, 3, 10))
     def test_worker_writing(self, tmpdir, shardlen, nworkers):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]'}
-        datapoints = [{'bar': i, 'baz': ['hello'] * i} for i in range(10)]
+        spec = {'bar': 'int', 'baz': 'utf8'}
+        datapoints = [{'bar': i, 'baz': f'hello{i}'} for i in range(10)]
         shards = 0
         size = 0
         for worker in range(nworkers):
@@ -112,8 +108,8 @@ class TestSharded:
     @pytest.mark.parametrize('nworkers', (1, 2, 3, 10))
     def test_worker_roundtrip(self, tmpdir, shardlen, nworkers):
         directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]'}
-        datapoints = [{'bar': i, 'baz': ['hello'] * i} for i in range(10)]
+        spec = {'bar': 'int', 'baz': 'utf8'}
+        datapoints = [{'bar': i, 'baz': f'hello{i}'} for i in range(10)]
         shards = 0
         size = 0
         for worker in range(nworkers):
@@ -142,29 +138,6 @@ class TestSharded:
         assert datapoints == received
 
     @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
-    def test_available(self, tmpdir, shardlen):
-        directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8[]', 'foo': 'utf8'}
-        datapoints = []
-        with granular.ShardedDatasetWriter(
-            directory, spec, granular.encoders, shardlen
-        ) as writer:
-            assert writer.spec == spec
-            for i in range(10):
-                baz = [f'word{j}' for j in range(i)]
-                datapoint = {'foo': 'hello world', 'bar': i, 'baz': baz}
-                writer.append(datapoint)
-                datapoints.append(datapoint)
-        with granular.ShardedDatasetReader(
-            directory, granular.decoders
-        ) as reader:
-            for i in range(10):
-                available = reader.available(i)
-                assert available == {'bar': True, 'baz': range(i), 'foo': True}
-                datapoint = reader[i, available]
-                assert datapoint == datapoints[i]
-
-    @pytest.mark.parametrize('shardlen', (None, 1, 3, 10, 15))
     def test_slicing(self, tmpdir, shardlen):
         directory = pathlib.Path(tmpdir) / 'dataset'
         spec = {'foo': 'utf8', 'bar': 'int'}
@@ -179,10 +152,8 @@ class TestSharded:
             stacked = {k: [x[k] for x in datapoints] for k in datapoints[0]}
             assert reader[0:10] == stacked
             assert reader[2:5] == {k: v[2:5] for k, v in stacked.items()}
-            assert reader[2:3, {'foo': True}] == {'foo': ['hello world']}
-            assert reader[2:4, {'foo': True}] == {'foo': ['hello world'] * 2}
-            assert reader[2:4, {'bar': True}] == {
+            assert reader[2:3, ('foo',)] == {'foo': ['hello world']}
+            assert reader[2:4, ('foo',)] == {'foo': ['hello world'] * 2}
+            assert reader[2:4, ('bar',)] == {
                 'bar': [datapoints[2]['bar'], datapoints[3]['bar']]
             }
-            with pytest.raises(Exception):
-                assert reader[2:4, {'bar': range(0, 1)}]
