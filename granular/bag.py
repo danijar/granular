@@ -24,8 +24,8 @@ class BagWriter(utils.Closing):
         assert file.writable(), file
         # Version 1 stores the starts and ends of all blobs, resulting in N+1
         # entries in the limits table, where the first entry is zero.
-        # Version 2 stores only the ends of all blobs, resulting in N entries in
-        # the limits table.
+        # Version 2 stores only the ends of all blobs, resulting in N entries
+        # in the limits table.
         self.version = version
         self.file = file
         self.offset = 0

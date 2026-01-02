@@ -189,8 +189,9 @@ class SharedArray:
         return self.arr
 
     def result(self):
-        # We cannot use self.close as finalizer because that would keep self alive
-        # and thus the reference count for self.shm would never reach zero.
+        # We cannot use self.close as finalizer because that would keep self
+        # alive and thus the reference count for self.shm would never reach
+        # zero.
         weakref.finalize(self.arr, self.shm.unlink)
         arr = self.arr
         self.arr = None  # Prevent future usage
