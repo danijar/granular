@@ -30,6 +30,9 @@ class TestSharded:
                 'bar.bag',
                 'baz.bag',
                 'foo.bag',
+                'bar.idx',
+                'baz.idx',
+                'foo.idx',
             }
 
     @pytest.mark.parametrize('shardlen', (None, 1, 5))
@@ -157,3 +160,95 @@ class TestSharded:
             assert reader[2:4, ('bar',)] == {
                 'bar': [datapoints[2]['bar'], datapoints[3]['bar']]
             }
+
+    @pytest.mark.parametrize('shardlen', (5, 10, None))
+    def test_resume_after_close(self, tmpdir, shardlen):
+        directory = pathlib.Path(tmpdir) / 'dataset'
+        spec = {'foo': 'utf8', 'bar': 'int'}
+        with granular.ShardedDatasetWriter(
+            directory, spec, granular.encoders, shardlen
+        ) as writer:
+            for i in range(5):
+                writer.append({'foo': f'value{i}', 'bar': i})
+        with granular.ShardedDatasetWriter(
+            directory, spec, granular.encoders, shardlen
+        ) as writer:
+            for i in range(5, 10):
+                writer.append({'foo': f'value{i}', 'bar': i})
+        with granular.ShardedDatasetReader(
+            directory, granular.decoders
+        ) as reader:
+            assert len(reader) == 10
+            for i in range(10):
+                assert reader[i] == {'foo': f'value{i}', 'bar': i}
+
+    @pytest.mark.parametrize('extra_records', [1, 2, 3])
+    def test_preemption_partial_write(self, tmpdir, extra_records):
+        directory = pathlib.Path(tmpdir) / 'dataset'
+        spec = {'foo': 'utf8', 'bar': 'int'}
+        with granular.ShardedDatasetWriter(
+            directory, spec, granular.encoders, shardlen=None
+        ) as writer:
+            for i in range(5):
+                writer.append({'foo': f'value{i}', 'bar': i})
+            current_shard = writer.shardnum
+        shard_dir = directory / f'{current_shard:06}'
+        with granular.BagWriter(shard_dir / 'foo.bag') as bag_writer:
+            for i in range(5, 5 + extra_records):
+                bag_writer.append(granular.encoders['utf8'](f'value{i}'))
+        with granular.ShardedDatasetWriter(
+            directory, spec, granular.encoders, shardlen=None
+        ) as writer:
+            for i in range(5, 5 + extra_records + 2):
+                writer.append({'foo': f'value{i}', 'bar': i})
+        with granular.ShardedDatasetReader(
+            directory, granular.decoders
+        ) as reader:
+            assert len(reader) == 5 + extra_records + 2
+            for i in range(5 + extra_records + 2):
+                assert reader[i] == {'foo': f'value{i}', 'bar': i}
+
+    def test_preemption_mismatch_raises(self, tmpdir):
+        directory = pathlib.Path(tmpdir) / 'dataset'
+        spec = {'foo': 'utf8', 'bar': 'int'}
+        with granular.ShardedDatasetWriter(
+            directory, spec, granular.encoders, shardlen=None
+        ) as writer:
+            for i in range(5):
+                writer.append({'foo': f'value{i}', 'bar': i})
+            current_shard = writer.shardnum
+        shard_dir = directory / f'{current_shard:06}'
+        with granular.BagWriter(shard_dir / 'foo.bag') as bag_writer:
+            bag_writer.append(granular.encoders['utf8']('WRONG_VALUE'))
+        with granular.ShardedDatasetWriter(
+            directory, spec, granular.encoders, shardlen=None
+        ) as writer:
+            with pytest.raises(ValueError, match='Record mismatch'):
+                writer.append({'foo': 'value5', 'bar': 5})
+
+    @pytest.mark.parametrize('extra_records', [1, 2])
+    def test_preemption_partial_shard(self, tmpdir, extra_records):
+        directory = pathlib.Path(tmpdir) / 'dataset'
+        spec = {'foo': 'utf8', 'bar': 'int'}
+        shardlen = 5
+        with granular.ShardedDatasetWriter(
+            directory, spec, granular.encoders, shardlen
+        ) as writer:
+            for i in range(3):
+                writer.append({'foo': f'value{i}', 'bar': i})
+        shard_dir = directory / '000000'
+        with granular.BagWriter(shard_dir / 'foo.bag') as bag_writer:
+            for i in range(3, 3 + extra_records):
+                bag_writer.append(granular.encoders['utf8'](f'value{i}'))
+        with granular.ShardedDatasetWriter(
+            directory, spec, granular.encoders, shardlen
+        ) as writer:
+            for i in range(3, 3 + extra_records + 4):
+                writer.append({'foo': f'value{i}', 'bar': i})
+        with granular.ShardedDatasetReader(
+            directory, granular.decoders
+        ) as reader:
+            total = 3 + extra_records + 4
+            assert len(reader) == total
+            for i in range(total):
+                assert reader[i] == {'foo': f'value{i}', 'bar': i}

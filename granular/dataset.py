@@ -1,8 +1,10 @@
+import collections
 import concurrent.futures
 import json
 import pathlib
 import pickle
 import re
+import struct
 
 from . import utils
 from . import bag
@@ -15,22 +17,19 @@ class DatasetWriter(utils.Closing):
         assert all(re.match(r'^[a-z_]', v) for v in spec.values()), spec
         if isinstance(directory, str):
             directory = pathlib.Path(directory)
-        assert not directory.exists(), directory
-        directory.mkdir()
-        spec = dict(sorted(spec.items(), key=lambda x: x[0]))
         if encoders is None:
-            encoders = {k: None for k in spec.keys()}
-        else:
-            encoders = {k: encoders[v] for k, v in spec.items()}
+            encoders = collections.defaultdict(lambda: None)
+        spec = dict(sorted(spec.items(), key=lambda x: x[0]))
         self.directory = directory
-        self.encoders = encoders
+        self.encoders = {k: encoders[v] for k, v in spec.items()}
         self.thespec = spec
+        self._writespec()
         self.writers = {
             k: bag.BagWriter(self.directory / f'{k}.bag')
             for k in self.spec.keys()
         }
-        self.specwritten = False
-        self.length = 0
+        # Some columns might be ahead from preemption.
+        self.length = min(len(x) for x in self.writers.values())
 
     @property
     def spec(self):
@@ -53,18 +52,17 @@ class DatasetWriter(utils.Closing):
             writer = self.writers[key]
             value = datapoint[key]
             value = self._encode(key, value, dtype)
-            writer.append(value, flush=False)
+            if len(writer) > self.length:
+                # Column is ahead from preemption, verify record matches.
+                self._verify(key, self.length, value)
+            else:
+                writer.append(value, flush=False)
         index = self.length
         self.length += 1
         flush and self.flush()
         return index
 
     def flush(self):
-        if not self.specwritten:
-            self.specwritten = True
-            content = json.dumps(self.spec).encode('utf-8')
-            with (self.directory / 'spec.json').open('wb') as f:
-                f.write(content)
         for writer in self.writers.values():
             writer.flush()
 
@@ -72,6 +70,15 @@ class DatasetWriter(utils.Closing):
         self.flush()
         for writer in self.writers.values():
             writer.close()
+
+    def _writespec(self):
+        filename = self.directory / 'spec.json'
+        if filename.exists():
+            existing = json.loads(filename.read_bytes())
+            assert self.spec == existing, (self.spec, existing)
+        else:
+            self.directory.mkdir(exist_ok=True, parents=True)
+            filename.write_bytes(json.dumps(self.spec).encode('utf-8'))
 
     def _encode(self, key, value, dtype):
         encoder = self.encoders[key]
@@ -84,6 +91,26 @@ class DatasetWriter(utils.Closing):
         except Exception:
             print(f"Error encoding key '{key}' of type '{dtype}'.")
             raise
+
+    def _verify(self, key, index, expected):
+        path = self.directory / f'{key}.bag'
+        idx_path = self.directory / f'{key}.idx'
+        with idx_path.open('rb') as f:
+            if index == 0:
+                start = 0
+            else:
+                f.seek((index - 1) * 8)
+                start = struct.unpack('<Q', f.read(8))[0]
+            f.seek(index * 8)
+            end = struct.unpack('<Q', f.read(8))[0]
+        with path.open('rb') as f:
+            f.seek(start)
+            existing = f.read(end - start)
+        if existing != expected:
+            raise ValueError(
+                f"Record mismatch in column '{key}' at index {index}: "
+                f'existing {len(existing)} bytes != new {len(expected)} bytes.'
+            )
 
 
 class DatasetReader(utils.Closing):
@@ -99,8 +126,9 @@ class DatasetReader(utils.Closing):
         assert isinstance(cache_keys, (tuple, list)), cache_keys
         if isinstance(directory, str):
             directory = pathlib.Path(directory)
-        with (directory / 'spec.json').open('rb') as f:
-            self.thespec = json.loads(f.read())
+        if decoders is None:
+            decoders = collections.defaultdict(lambda: None)
+        self.thespec = json.loads((directory / 'spec.json').read_bytes())
         info = (self.thespec, cache_keys)
         assert all(k in self.thespec for k in cache_keys), info
         self.readers = {
@@ -112,13 +140,10 @@ class DatasetReader(utils.Closing):
             for k in self.spec.keys()
         }
         lengths = {k: len(v) for k, v in self.readers.items()}
-        assert len(set(lengths.values())) == 1, (directory, lengths)
-        self.length, = set(lengths.values())
-        if decoders is None:
-            decoders = {k: None for k in self.spec.keys()}
-        else:
-            decoders = {k: decoders[v] for k, v in self.spec.items()}
-        self.decoders = decoders
+        msg = f'Inconsistent column lengths: {lengths}'
+        assert len(set(lengths.values())) == 1, msg
+        (self.length,) = set(lengths.values())
+        self.decoders = {k: decoders[v] for k, v in self.spec.items()}
         self.cache_keys = cache_keys
         self.workers = int(parallel and len(set(self.spec) - set(cache_keys)))
         if self.workers:
@@ -155,19 +180,15 @@ class DatasetReader(utils.Closing):
         else:
             keys = tuple(self.spec.keys())
         assert all(k in self.spec for k in keys), (self.spec, keys)
+        dec = lambda k, v: self._decode(k, v, self.spec[k])
         if isinstance(index, int):
             point = self._fetch(keys, index)
-            decoded = {
-                k: self._decode(k, v, self.spec[k]) for k, v in point.items()
-            }
+            decoded = {k: dec(k, v) for k, v in point.items()}
         else:
             i = index
             assert 0 <= i.start <= i.stop and i.step in (None, 1), i
             points = self._fetch(keys, index)
-            decoded = {
-                k: [self._decode(k, v, self.spec[k]) for v in vs]
-                for k, vs in points.items()
-            }
+            decoded = {k: [dec(k, v) for v in vs] for k, vs in points.items()}
         return decoded
 
     def copy(self):

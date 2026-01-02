@@ -26,6 +26,9 @@ class TestDataset:
             'foo.bag',
             'bar.bag',
             'baz.bag',
+            'foo.idx',
+            'bar.idx',
+            'baz.idx',
         }
         spec2 = json.loads((directory / 'spec.json').read_bytes())
         assert list(spec2.keys()) == sorted(spec2.keys())
@@ -157,3 +160,65 @@ class TestDataset:
             datapoint = reader[i]
             assert datapoint == datapoints[i]
         # Intentionally omitted reader.close().
+
+    def test_resume_after_close(self, tmpdir):
+        directory = pathlib.Path(tmpdir) / 'dataset'
+        spec = {'foo': 'utf8', 'bar': 'int'}
+        with granular.DatasetWriter(
+            directory, spec, granular.encoders
+        ) as writer:
+            for i in range(5):
+                writer.append({'foo': f'value{i}', 'bar': i})
+            assert len(writer) == 5
+        with granular.DatasetWriter(
+            directory, spec, granular.encoders
+        ) as writer:
+            assert len(writer) == 5
+            for i in range(5, 10):
+                writer.append({'foo': f'value{i}', 'bar': i})
+            assert len(writer) == 10
+        with granular.DatasetReader(directory, granular.decoders) as reader:
+            assert len(reader) == 10
+            for i in range(10):
+                assert reader[i] == {'foo': f'value{i}', 'bar': i}
+
+    @pytest.mark.parametrize('extra_records', [1, 2, 3])
+    def test_preemption_partial_write(self, tmpdir, extra_records):
+        directory = pathlib.Path(tmpdir) / 'dataset'
+        spec = {'foo': 'utf8', 'bar': 'int'}
+        with granular.DatasetWriter(
+            directory, spec, granular.encoders
+        ) as writer:
+            for i in range(5):
+                writer.append({'foo': f'value{i}', 'bar': i})
+        with granular.BagWriter(directory / 'foo.bag') as bag_writer:
+            for i in range(5, 5 + extra_records):
+                bag_writer.append(granular.encoders['utf8'](f'value{i}'))
+        with granular.DatasetWriter(
+            directory, spec, granular.encoders
+        ) as writer:
+            assert len(writer) == 5
+            for i in range(5, 5 + extra_records + 2):
+                writer.append({'foo': f'value{i}', 'bar': i})
+            assert len(writer) == 5 + extra_records + 2
+        with granular.DatasetReader(directory, granular.decoders) as reader:
+            assert len(reader) == 5 + extra_records + 2
+            for i in range(5 + extra_records + 2):
+                assert reader[i] == {'foo': f'value{i}', 'bar': i}
+
+    def test_preemption_mismatch_raises(self, tmpdir):
+        directory = pathlib.Path(tmpdir) / 'dataset'
+        spec = {'foo': 'utf8', 'bar': 'int'}
+        with granular.DatasetWriter(
+            directory, spec, granular.encoders
+        ) as writer:
+            for i in range(5):
+                writer.append({'foo': f'value{i}', 'bar': i})
+        with granular.BagWriter(directory / 'foo.bag') as bag_writer:
+            bag_writer.append(granular.encoders['utf8']('WRONG_VALUE'))
+        with granular.DatasetWriter(
+            directory, spec, granular.encoders
+        ) as writer:
+            assert len(writer) == 5
+            with pytest.raises(ValueError, match='Record mismatch'):
+                writer.append({'foo': 'value5', 'bar': 5})

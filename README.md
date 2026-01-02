@@ -2,18 +2,16 @@
 
 # Granular
 
-Granular is a format for datasets, from simple to complex. Each Granular
-dataset is a collection of linked files in [bag file format][bag], a
-seekable container structure. Granular comes with a high-performance
-data loader.
+Granular is simple and scalable dataset format. Each dataset is a collection
+of seekable record files that support fast random accesses and resumable
+appends. Granular comes with a high-performance data loader.
 
 ```
 pip install granular
 ```
 
-[bag]: ...
-
-**NOTE:** The API and file format have changed in version 0.22.0. Pin
+**NOTE:** The API and file format have been updated in version 0.22.0 to
+support resumable writes. Previously written datasets can still be read. Pin
 `granular<=0.21.2` to continue using the [previous version][previous].
 
 [previous]: https://github.com/danijar/granular/tree/087bc1c529aa7716bdf56d1a0edf0175ab983325
@@ -60,7 +58,7 @@ with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
     writer.append(datapoint)
 
 print(list(directory.glob('*')))
-# ['spec.json', 'foo.bag', 'bar.bag', 'baz.bag', 'abc.bag', 'xyz.bag']
+# 'spec.json', 'foo.bag', 'foo.idx', 'bar.bag', 'bar.idx', ...]
 ```
 
 Reading
@@ -85,8 +83,7 @@ def preproc(datapoint, seed):
 
 source = granular.sources.Epochs(reader, shuffle=True, seed=0)
 source = granular.sources.Transform(source, preproc)
-
-loader = granular.Loader(source, batch=8, workers=64)
+loader = granular.Loader(source, batch=8, workers=32)
 
 print(loader.spec)
 # {'image': (np.uint8, (60, 80, 3)), 'label': (np.int64, ())}
@@ -163,10 +160,10 @@ If some keys have small enough values, they can be cached in RAM by setting
 labels.
 
 Additionally, reading from a Bag file requires two read operations. The first
-operation looks at the index table at the end of the file to locate the byte
-offset of the record. The second operation retrieves the actual record. In
-general, it is recommended to cache the index for all Bag files. Together, the
-tables take up `8 * len(spec) * len(reader)` bytes of RAM.
+operation looks at the index file (`.idx`) to locate the byte offset of the
+record. The second operation retrieves the actual record from the data file
+(`.bag`). It is recommended to cache the index for all Bag files. Together, the
+index files take up `8 * len(spec) * len(reader)` bytes of RAM.
 
 ```python
 reader = granular.DatasetReader(
@@ -216,15 +213,14 @@ non-sharded `granular.DatasetReader`.
 $ tree ./directory
 .
 ├── 000000
-│  ├── spec.json
-│  ├── foo.bag
-│  ├── bar.bag
-│  └── baz.bag
+│   ├── spec.json
+│   ├── foo.bag
+│   ├── foo.idx
+│   ├── bar.bag
+│   ├── bar.idx
+│   └── ...
 ├── 000001
-│  ├── spec.json
-│  ├── foo.bag
-│  ├── bar.bag
-│  └── baz.bag
+│   └── ...
 └── ...
 ```
 

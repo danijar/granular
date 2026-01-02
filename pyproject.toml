@@ -1,6 +1,6 @@
 [project]
 name = "granular"
-version = "0.22.0"
+version = "0.22.0a1"
 description = "Fast format for datasets"
 readme="README.md"
 license="MIT"
