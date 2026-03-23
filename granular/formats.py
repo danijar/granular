@@ -72,36 +72,16 @@ def decode_image(buffer, *args):
     return np.asarray(Image.open(io.BytesIO(buffer)))
 
 
-def encode_video(array, fps=20, format='mp4', codec='h264'):
-    import av
+def encode_video(array, fps=20, codec='h264'):
+    import mediapy
 
-    T, H, W = array.shape[:3]
-    fp = io.BytesIO()
-    output = av.open(fp, mode='w', format=format)
-    stream = output.add_stream(codec, rate=fps)
-    stream.width = W
-    stream.height = H
-    stream.pix_fmt = 'yuv420p'
-    for t in range(T):
-        frame = av.VideoFrame.from_ndarray(array[t], format='rgb24')
-        frame.pts = t
-        output.mux(stream.encode(frame))
-    output.mux(stream.encode(None))
-    output.close()
-    return fp.getvalue()
+    return mediapy.compress_video(array, fps=fps, codec=codec)
 
 
 def decode_video(buffer, *args):
-    import numpy as np
-    import av
+    import mediapy
 
-    container = av.open(io.BytesIO(buffer))
-    array = []
-    for frame in container.decode(video=0):
-        array.append(frame.to_ndarray(format='rgb24'))
-    array = np.stack(array)
-    container.close()
-    return array
+    return np.asarray(mediapy.decompress_video(buffer))
 
 
 encoders = {
@@ -115,8 +95,8 @@ encoders = {
     'tree': encode_tree,
     'jpg': bind(encode_image, format='jpg'),
     'png': bind(encode_image, format='png'),
-    'mp4': bind(encode_video, format='mp4', codec='h264'),
-    'webm': bind(encode_video, format='webm', codec='vp9'),
+    'mp4': bind(encode_video, codec='h264'),
+    'webm': bind(encode_video, codec='vp9'),
 }
 
 

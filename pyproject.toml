@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 formats = [
-  "av",
+  "mediapy",
   "pillow",
 ]
 
