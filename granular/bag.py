@@ -1,3 +1,4 @@
+import atexit
 import functools
 import os
 import pathlib
@@ -251,6 +252,11 @@ class SharedBuffer:
             self.buf = self.shm.buf
         else:
             self.buf = bytes(content)
+        # Release the buffer when it's creator process exits. Other processes
+        # holding references will not automatically free the buffer, because
+        # serialization goes through __getstate__ and __setstate__ instead of
+        # __init__.
+        atexit.register(self.close)
 
     @property
     def closed(self):
