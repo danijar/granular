@@ -31,6 +31,24 @@ class TestBag:
 
     @pytest.mark.parametrize('cache_index', (True, False))
     @pytest.mark.parametrize('cache_data', (True, False))
+    def test_empty_bag(self, tmpdir, cache_index, cache_data):
+        bag = pathlib.Path(tmpdir) / 'file.bag'
+        idx = pathlib.Path(tmpdir) / 'file.idx'
+        with granular.BagWriter(bag) as writer:
+            assert len(writer) == 0
+            assert writer.size == 0
+        assert bag.exists()
+        assert idx.exists()
+        assert bag.stat().st_size == 0
+        assert idx.stat().st_size == 0
+        with granular.BagReader(
+            bag, cache_index=cache_index, cache_data=cache_data
+        ) as reader:
+            assert len(reader) == 0
+            assert reader.size == 0
+
+    @pytest.mark.parametrize('cache_index', (True, False))
+    @pytest.mark.parametrize('cache_data', (True, False))
     def test_roundtrip(self, tmpdir, cache_index, cache_data):
         bag = pathlib.Path(tmpdir) / 'file.bag'
         rng = np.random.default_rng(seed=0)
