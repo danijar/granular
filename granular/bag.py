@@ -58,15 +58,13 @@ class BagWriter(utils.Closing):
             combined = self._skip(combined)
         if combined:
             self.bag.write(combined)
-            # Flush is not guaranteed by some IO implementations anyways.
-            # self.bag.flush()
+            self.bag.flush()
         entries = []
         for record in self.towrite:
             self.offset += len(record)
             entries.append(limst.pack(self.offset))
         self.idx.write(b''.join(entries))
-        # Flush is not guaranteed by some IO implementations anyways.
-        # self.idx.flush()
+        self.idx.flush()
         self.towrite.clear()
 
     def close(self):
