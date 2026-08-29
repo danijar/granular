@@ -4,6 +4,7 @@ import os
 import pathlib
 import pickle
 import struct
+import types
 from multiprocessing import shared_memory
 
 from . import utils
@@ -243,11 +244,16 @@ class SharedBuffer:
     def __init__(self, content):
         if self.ENABLE:
             self.size = len(content)
-            self.shm = shared_memory.SharedMemory(create=True, size=self.size)
-            # The slice range is needed on MacOS where SharedMemory buffers can
-            # be larger than requested.
-            self.shm.buf[: self.size] = memoryview(content)
-            self.buf = self.shm.buf
+            if self.size:
+                kwargs = dict(create=True, size=self.size)
+                self.shm = shared_memory.SharedMemory(**kwargs)
+                # The slice range is needed on MacOS where SharedMemory buffers can
+                # be larger than requested.
+                self.shm.buf[: self.size] = memoryview(content)
+                self.buf = self.shm.buf
+            else:
+                self.shm = types.SimpleNamespace(name=None)
+                self.buf = memoryview(bytearray(b''))
         else:
             self.buf = bytes(content)
         # Release the buffer when it's creator process exits. Other processes
@@ -272,8 +278,12 @@ class SharedBuffer:
     def __setstate__(self, value):
         if self.ENABLE:
             name, size = value
-            self.shm = shared_memory.SharedMemory(name=name)
-            self.buf = self.shm.buf
+            if name:
+                self.shm = shared_memory.SharedMemory(name=name)
+                self.buf = self.shm.buf
+            else:
+                self.shm = types.SimpleNamespace(name=None)
+                self.buf = memoryview(bytearray(b''))
             self.size = size
         else:
             self.buf = value
@@ -285,7 +295,8 @@ class SharedBuffer:
     def close(self):
         self.buf = None
         try:
-            self.shm.unlink()
+            if self.shm.name:
+                self.shm.unlink()
         except FileNotFoundError:
             pass
 
