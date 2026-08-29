@@ -51,7 +51,7 @@ class TestBag:
     @pytest.mark.parametrize('cache_data', (True, False))
     def test_zero_length_record(self, tmpdir, cache_index, cache_data):
         bag = pathlib.Path(tmpdir) / 'file.bag'
-        values = [b'a', b'', b'', b'b']
+        values = [b'foo', b'', b'', b'bar']
         with granular.BagWriter(bag) as writer:
             for value in values:
                 writer.append(value)
