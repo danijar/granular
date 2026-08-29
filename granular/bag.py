@@ -40,7 +40,6 @@ class BagWriter(utils.Closing):
         return self.length
 
     def append(self, record, flush=True):
-        assert len(record), 'empty record'
         assert not self.closed
         assert self.length < 2**32 - 1, self.length
         assert isinstance(record, bytes), type(record)
