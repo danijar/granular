@@ -161,11 +161,11 @@ class BagReader(utils.Closing):
 
     @functools.cached_property
     def bag(self):
-        return self.bag_source.open('rb')
+        return self.bag_source.open('rb', buffering=8192)
 
     @functools.cached_property
     def idx(self):
-        return self.idx_source.open('rb')
+        return self.idx_source.open('rb', buffering=8192)
 
     @property
     def size(self):
@@ -287,7 +287,8 @@ class SharedBuffer:
         else:
             self.buf = value
 
-    def open(self, mode='rb', offset=0):
+    def open(self, mode='rb', offset=0, buffering=-1):
+        del buffering
         assert mode in ('rb', 'wb'), mode
         return BufferView(self.buf, self.size, offset)
 
