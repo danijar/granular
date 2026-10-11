@@ -101,7 +101,8 @@ class ShardedDatasetReader(utils.Closing):
         range_ = range(shardstart, len(folders), shardstep)
         selected = [folders[i] for i in range_]
         assert selected, (folders, selected, shardstart, shardstep)
-        args = (decoders, cache_index, cache_keys, parallel)
+        pool_name = str(directory)  # Share thread pools across shards
+        args = (decoders, cache_index, cache_keys, parallel, pool_name)
         if parallel:
             make = lambda x: dataset.DatasetReader(x, *args)
             with concurrent.futures.ThreadPoolExecutor(len(selected)) as pool:
