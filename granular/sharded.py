@@ -1,5 +1,6 @@
 import concurrent.futures
 import itertools
+import json
 import operator
 import pathlib
 import pickle
@@ -101,7 +102,10 @@ class ShardedDatasetReader(utils.Closing):
         range_ = range(shardstart, len(folders), shardstep)
         selected = [folders[i] for i in range_]
         assert selected, (folders, selected, shardstart, shardstep)
-        args = (decoders, cache_index, cache_keys, parallel)
+        spec = json.loads((selected[0] / 'spec.json').read_bytes())
+        self.key_workers = int(parallel and len(set(spec) - set(cache_keys)))
+        self.key_pool = self._make_key_pool()
+        args = (decoders, cache_index, cache_keys, parallel, self.key_pool)
         if parallel:
             make = lambda x: dataset.DatasetReader(x, *args)
             with concurrent.futures.ThreadPoolExecutor(len(selected)) as pool:
@@ -152,9 +156,28 @@ class ShardedDatasetReader(utils.Closing):
     def copy(self):
         return pickle.loads(pickle.dumps(self))
 
+    def __getstate__(self):
+        d = self.__dict__.copy()
+        d.pop('key_pool')
+        return d
+
+    def __setstate__(self, d):
+        self.__dict__.update(d)
+        self.key_pool = self._make_key_pool()
+        if self.key_pool:
+            for reader in self.readers:
+                reader.setpool(self.key_pool)
+
     def close(self):
         for reader in self.readers:
             reader.close()
+        if self.key_pool:
+            self.key_pool.shutdown(wait=False)
+
+    def _make_key_pool(self):
+        if not self.key_workers:
+            return None
+        return concurrent.futures.ThreadPoolExecutor(self.key_workers)
 
     def _resolve(self, start, stop):
         assert 0 <= start <= stop <= len(self), (start, stop, len(self))

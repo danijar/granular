@@ -121,6 +121,7 @@ class DatasetReader(utils.Closing):
         cache_index=True,
         cache_keys=(),
         parallel=False,
+        pool=None,
     ):
         super().__init__()
         assert isinstance(cache_keys, (tuple, list)), cache_keys
@@ -147,7 +148,10 @@ class DatasetReader(utils.Closing):
         self.cache_keys = cache_keys
         self.workers = int(parallel and len(set(self.spec) - set(cache_keys)))
         if self.workers:
-            self.pool = concurrent.futures.ThreadPoolExecutor(self.workers)
+            self.ownpool = pool is None
+            self.pool = pool or concurrent.futures.ThreadPoolExecutor(
+                self.workers
+            )
 
     @property
     def spec(self):
@@ -165,7 +169,7 @@ class DatasetReader(utils.Closing):
 
     def __setstate__(self, d):
         self.__dict__.update(d)
-        if self.workers:
+        if self.workers and self.ownpool:
             self.pool = concurrent.futures.ThreadPoolExecutor(self.workers)
 
     def __len__(self):
@@ -194,8 +198,12 @@ class DatasetReader(utils.Closing):
     def copy(self):
         return pickle.loads(pickle.dumps(self))
 
+    def setpool(self, pool):
+        self.pool = pool
+        self.ownpool = False
+
     def close(self):
-        if self.workers:
+        if self.workers and self.ownpool:
             self.pool.shutdown(wait=False)
         for reader in self.readers.values():
             reader.close()
