@@ -1,10 +1,11 @@
-import collections
 import concurrent.futures
+import functools
 import json
 import pathlib
 import pickle
 import re
 import struct
+import threading
 
 from . import utils
 from . import bag
@@ -114,6 +115,9 @@ class DatasetWriter(utils.Closing):
 
 
 class DatasetReader(utils.Closing):
+    LOCK = threading.Lock()
+    POOLS = {}
+
     def __init__(
         self,
         directory,
@@ -121,6 +125,7 @@ class DatasetReader(utils.Closing):
         cache_index=True,
         cache_keys=(),
         parallel=False,
+        pool_name=None,
     ):
         super().__init__()
         assert isinstance(cache_keys, (tuple, list)), cache_keys
@@ -146,8 +151,7 @@ class DatasetReader(utils.Closing):
         self.decoders = {k: decoders[v] for k, v in self.spec.items()}
         self.cache_keys = cache_keys
         self.workers = int(parallel and len(set(self.spec) - set(cache_keys)))
-        if self.workers:
-            self.pool = concurrent.futures.ThreadPoolExecutor(self.workers)
+        self.pool_name = pool_name or id(self)
 
     @property
     def spec(self):
@@ -159,14 +163,11 @@ class DatasetReader(utils.Closing):
 
     def __getstate__(self):
         d = self.__dict__.copy()
-        if self.workers:
-            d.pop('pool')
+        d.pop('_pool', None)
         return d
 
     def __setstate__(self, d):
         self.__dict__.update(d)
-        if self.workers:
-            self.pool = concurrent.futures.ThreadPoolExecutor(self.workers)
 
     def __len__(self):
         return self.length
@@ -195,10 +196,31 @@ class DatasetReader(utils.Closing):
         return pickle.loads(pickle.dumps(self))
 
     def close(self):
-        if self.workers:
-            self.pool.shutdown(wait=False)
+        if self.workers and '_pool' in vars(self):
+            with self.LOCK:
+                self._pool.users.remove(self)
+                if not self._pool.users:
+                    pool = self.POOLS.pop(self.pool_name)
+                    pool.shutdown(wait=False)
         for reader in self.readers.values():
             reader.close()
+
+    @functools.cached_property
+    def _pool(self):
+        with self.LOCK:
+            if self.pool_name not in self.POOLS:
+                pool = concurrent.futures.ThreadPoolExecutor(self.workers)
+                pool.users = {self}
+                pool.workers = self.workers
+                self.POOLS[self.pool_name] = pool
+            pool = self.POOLS[self.pool_name]
+            pool.users.add(self)
+        if pool.workers != self.workers:
+            raise ValueError(
+                f'Existing pool with name {self.pool_name} has '
+                f'{pool.workers} workers but expected {self.workers}'
+            )
+        return pool
 
     def _fetch(self, keys, index):
         if self.workers:
@@ -206,7 +228,7 @@ class DatasetReader(utils.Closing):
             reqs1 = [k for k in keys if not cached(k)]
             reqs2 = [k for k in keys if cached(k)]
             fn = lambda k: self.readers[k][index]
-            values1 = self.pool.map(fn, reqs1)
+            values1 = self._pool.map(fn, reqs1)
             values2 = [self.readers[k][index] for k in reqs2]
             datapoint = dict([*zip(reqs1, values1), *zip(reqs2, values2)])
         else:
