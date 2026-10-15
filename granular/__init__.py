@@ -12,4 +12,7 @@ from .formats import decoders
 
 from .loader import Loader
 
+from .utils import commit
+from .utils import committed
+
 from . import sources
