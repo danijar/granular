@@ -62,8 +62,7 @@ class ShardedDatasetWriter(utils.Closing):
             self.writer = dataset.DatasetWriter(
                 folder, self.spec, self.encoders
             )
-        self.writer.append(datapoint)
-        flush and self.writer.flush()
+        self.writer.append(datapoint, flush=flush)
         if self.shardlength and len(self.writer) >= self.shardlength:
             self.prevshards += 1
             self.prevsize += self.writer.size
