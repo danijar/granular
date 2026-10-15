@@ -21,6 +21,7 @@ class DatasetWriter(utils.Closing):
             directory = pathlib.Path(directory)
         if encoders is None:
             encoders = collections.defaultdict(lambda: None)
+        utils.check_writable(directory)
         spec = dict(sorted(spec.items(), key=lambda x: x[0]))
         self.directory = directory
         self.encoders = {k: encoders[v] for k, v in spec.items()}
