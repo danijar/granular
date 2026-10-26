@@ -22,11 +22,12 @@ class TestSharded:
             else:
                 assert writer.shards == 1
         assert set(x.name for x in directory.glob('*')) == {
-            f'{i:06}' for i in range(writer.shards)
+            'meta.json',
+            *(f'{i:06}' for i in range(writer.shards)),
         }
-        for folder in directory.glob('*'):
+        for folder in directory.glob('0*'):
             assert set(x.name for x in folder.glob('*')) == {
-                'spec.json',
+                'meta.json',
                 'bar.bag',
                 'baz.bag',
                 'foo.bag',

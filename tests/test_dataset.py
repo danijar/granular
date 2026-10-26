@@ -22,7 +22,7 @@ class TestDataset:
             assert len(writer) == 10
             assert writer.size > 0
         assert set(x.name for x in directory.glob('*')) == {
-            'spec.json',
+            'meta.json',
             'foo.bag',
             'bar.bag',
             'baz.bag',
@@ -30,7 +30,7 @@ class TestDataset:
             'bar.idx',
             'baz.idx',
         }
-        spec2 = json.loads((directory / 'spec.json').read_bytes())
+        spec2 = json.loads((directory / 'meta.json').read_bytes())['spec']
         assert list(spec2.keys()) == sorted(spec2.keys())
         assert set(spec.keys()) == set(spec2.keys())
         assert spec == spec2

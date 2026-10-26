@@ -58,7 +58,7 @@ with granular.DatasetWriter(directory, spec, granular.encoders) as writer:
     writer.append(datapoint)
 
 print(list(directory.glob('*')))
-# 'spec.json', 'foo.bag', 'foo.idx', 'bar.bag', 'bar.idx', ...]
+# 'meta.json', 'foo.bag', 'foo.idx', 'bar.bag', 'bar.idx', ...]
 ```
 
 Reading
@@ -205,15 +205,16 @@ writer = granular.ShardedDatasetWriter(directory, spec, encoders, shardlen=10000
 reader = granular.ShardedDatasetReader(directory, decoders)
 ```
 
-The file structure of a sharded dataset is one folder per shard, named after
-the shard number. Each shard itself is a dataset and can also be read using the
-non-sharded `granular.DatasetReader`.
+The file structure of a sharded dataset is a `meta.json` and one folder per
+shard, named after the shard number. Each shard itself is a dataset and can
+also be read using the non-sharded `granular.DatasetReader`.
 
 ```sh
 $ tree ./directory
 .
+├── meta.json
 ├── 000000
-│   ├── spec.json
+│   ├── meta.json
 │   ├── foo.bag
 │   ├── foo.idx
 │   ├── bar.bag

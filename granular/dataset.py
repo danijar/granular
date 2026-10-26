@@ -1,7 +1,6 @@
 import collections
 import concurrent.futures
 import functools
-import json
 import pathlib
 import pickle
 import re
@@ -25,7 +24,7 @@ class DatasetWriter(utils.Closing):
         self.directory = directory
         self.encoders = {k: encoders[v] for k, v in spec.items()}
         self.thespec = spec
-        self._writespec()
+        utils.writemeta(self.directory, self.spec)
         self.writers = {
             k: bag.BagWriter(self.directory / f'{k}.bag')
             for k in self.spec.keys()
@@ -72,15 +71,6 @@ class DatasetWriter(utils.Closing):
         self.flush()
         for writer in self.writers.values():
             writer.close()
-
-    def _writespec(self):
-        filename = self.directory / 'spec.json'
-        if filename.exists():
-            existing = json.loads(filename.read_bytes())
-            assert self.spec == existing, (self.spec, existing)
-        else:
-            self.directory.mkdir(exist_ok=True, parents=True)
-            filename.write_bytes(json.dumps(self.spec).encode('utf-8'))
 
     def _encode(self, key, value, dtype):
         encoder = self.encoders[key]
@@ -134,7 +124,9 @@ class DatasetReader(utils.Closing):
             directory = pathlib.Path(directory)
         if decoders is None:
             decoders = collections.defaultdict(lambda: None)
-        self.thespec = json.loads((directory / 'spec.json').read_bytes())
+        meta = utils.readmeta(directory)
+        assert meta, directory
+        self.thespec = meta['spec']
         info = (self.thespec, cache_keys)
         assert all(k in self.thespec for k in cache_keys), info
         self.readers = {
