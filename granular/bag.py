@@ -149,15 +149,11 @@ class BagReader(utils.Closing):
                 idx_source = SharedBuffer(self.bag.read(length * 8))
 
         # Index source
-        if cache_index and ispath(idx_source):
-            with idx_source.open('rb') as f:
-                idx_source = SharedBuffer(f.read())
         if not hasattr(idx_source, 'open'):
             cache_index = False
             idx_source = SharedBuffer(idx_source)
+        self.cache_index = cache_index
         self.idx_source = idx_source
-        self.idx.seek(0, os.SEEK_END)
-        self.length = self.idx.tell() // 8
 
     @functools.cached_property
     def bag(self):
@@ -165,7 +161,15 @@ class BagReader(utils.Closing):
 
     @functools.cached_property
     def idx(self):
+        if self.cache_index and ispath(self.idx_source):
+            with self.idx_source.open('rb') as f:
+                self.idx_source = SharedBuffer(f.read())
         return self.idx_source.open('rb', buffering=8192)
+
+    @functools.cached_property
+    def length(self):
+        self.idx.seek(0, os.SEEK_END)
+        return self.idx.tell() // 8
 
     @property
     def size(self):
@@ -175,16 +179,17 @@ class BagReader(utils.Closing):
         return datasize + self.length * 8
 
     def __getstate__(self):
-        return {
+        state = {
             'bag_source': self.bag_source,
             'idx_source': self.idx_source,
-            'length': self.length,
+            'cache_index': self.cache_index,
         }
+        if 'length' in vars(self):
+            state['length'] = self.length
+        return state
 
     def __setstate__(self, d):
-        self.bag_source = d['bag_source']
-        self.idx_source = d['idx_source']
-        self.length = d['length']
+        self.__dict__.update(d)
         self.closed = False
 
     def __len__(self):
@@ -215,8 +220,9 @@ class BagReader(utils.Closing):
 
     def close(self):
         assert not self.closed
-        self.bag.close()
-        self.idx.close()
+        for name in ('bag', 'idx'):
+            if name in vars(self):
+                vars(self)[name].close()
         if isinstance(self.idx_source, SharedBuffer):
             if not self.idx_source.closed:
                 self.idx_source.close()
