@@ -107,6 +107,7 @@ class BagReader(utils.Closing):
         cache_index=True,
         cache_data=False,
         single_file=False,  # Old format
+        partial=False,
     ):
         super().__init__()
 
@@ -158,6 +159,15 @@ class BagReader(utils.Closing):
         self.idx_source = idx_source
         self.idx.seek(0, os.SEEK_END)
         self.length = self.idx.tell() // 8
+        if partial:
+            self.length = self._complete(self.length)
+
+    def _complete(self, length):
+        self.bag.seek(0, os.SEEK_END)
+        bagsize = self.bag.tell()
+        while length and self._getlim(length - 1, length)[1] > bagsize:
+            length -= 1
+        return length
 
     @functools.cached_property
     def bag(self):

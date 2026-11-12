@@ -127,6 +127,7 @@ class DatasetReader(utils.Closing):
         cache_keys=(),
         parallel=False,
         pool_name=None,
+        partial=False,
     ):
         super().__init__()
         assert isinstance(cache_keys, (tuple, list)), cache_keys
@@ -142,13 +143,14 @@ class DatasetReader(utils.Closing):
                 directory / f'{k}.bag',
                 cache_index=cache_index,
                 cache_data=(k in cache_keys),
+                partial=partial,
             )
             for k in self.spec.keys()
         }
         lengths = {k: len(v) for k, v in self.readers.items()}
         msg = f'Inconsistent column lengths: {lengths}'
-        assert len(set(lengths.values())) == 1, msg
-        (self.length,) = set(lengths.values())
+        assert partial or len(set(lengths.values())) == 1, msg
+        self.length = min(lengths.values())
         self.decoders = {k: decoders[v] for k, v in self.spec.items()}
         self.cache_keys = cache_keys
         self.workers = int(parallel and len(set(self.spec) - set(cache_keys)))
@@ -189,6 +191,7 @@ class DatasetReader(utils.Closing):
         else:
             i = index
             assert 0 <= i.start <= i.stop and i.step in (None, 1), i
+            index = slice(i.start, min(i.stop, self.length))
             points = self._fetch(keys, index)
             decoded = {k: [dec(k, v) for v in vs] for k, vs in points.items()}
         return decoded

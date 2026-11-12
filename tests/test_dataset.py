@@ -222,3 +222,21 @@ class TestDataset:
             assert len(writer) == 5
             with pytest.raises(ValueError, match='Record mismatch'):
                 writer.append({'foo': 'value5', 'bar': 5})
+
+    def test_partial(self, tmpdir):
+        directory = pathlib.Path(tmpdir) / 'dataset'
+        spec = {'bar': 'int', 'baz': 'utf8'}
+        with granular.DatasetWriter(
+            directory, spec, granular.encoders
+        ) as writer:
+            for i in range(3):
+                writer.append({'bar': i, 'baz': f'word{i}'})
+        with granular.BagWriter(directory / 'baz.bag') as writer:
+            writer.append(granular.encoders['utf8']('extra'))
+        with pytest.raises(AssertionError, match='Inconsistent column'):
+            granular.DatasetReader(directory, granular.decoders)
+        reader = granular.DatasetReader(
+            directory, granular.decoders, partial=True
+        )
+        assert len(reader) == 3
+        assert reader[0:9]['baz'] == ['word0', 'word1', 'word2']
