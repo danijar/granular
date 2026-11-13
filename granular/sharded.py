@@ -97,9 +97,6 @@ class ShardedDatasetReader(utils.Closing):
         if isinstance(directory, str):
             directory = pathlib.Path(directory)
         folders = sorted(directory.glob('*'))
-        if partial:
-            # A writer that is still creating a shard has not written its spec.
-            folders = [x for x in folders if (x / 'spec.json').exists()]
         assert all(int(x.name) == i for i, x in enumerate(folders)), folders
         range_ = range(shardstart, len(folders), shardstep)
         selected = [folders[i] for i in range_]

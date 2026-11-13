@@ -240,19 +240,3 @@ class TestDataset:
         )
         assert len(reader) == 3
         assert reader[0:9]['baz'] == ['word0', 'word1', 'word2']
-
-    def test_partial_missing_column_files(self, tmpdir):
-        directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8'}
-        with granular.DatasetWriter(
-            directory, spec, granular.encoders
-        ) as writer:
-            for i in range(3):
-                writer.append({'bar': i, 'baz': f'word{i}'})
-        (directory / 'baz.idx').unlink()
-        with pytest.raises(FileNotFoundError):
-            granular.DatasetReader(directory, granular.decoders)
-        reader = granular.DatasetReader(
-            directory, granular.decoders, partial=True
-        )
-        assert len(reader) == 0
