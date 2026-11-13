@@ -121,6 +121,11 @@ class BagReader(utils.Closing):
             assert ispath(bag_source), msg
             idx_source = bag_source.with_suffix('.idx')
 
+        # A writer that is still creating its files reads as empty.
+        if partial and ispath(bag_source) and ispath(idx_source):
+            if not (bag_source.exists() and idx_source.exists()):
+                bag_source, idx_source = b'', b''
+
         # Bag source
         if cache_data and ispath(bag_source):
             with bag_source.open('rb') as f:

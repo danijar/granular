@@ -252,3 +252,22 @@ class TestSharded:
             assert len(reader) == total
             for i in range(total):
                 assert reader[i] == {'foo': f'value{i}', 'bar': i}
+
+    def test_partial_new_shard(self, tmpdir):
+        directory = pathlib.Path(tmpdir) / 'dataset'
+        spec = {'foo': 'utf8', 'bar': 'int'}
+        with granular.ShardedDatasetWriter(
+            directory, spec, granular.encoders, shardlen=3
+        ) as writer:
+            for i in range(6):
+                writer.append({'foo': f'value{i}', 'bar': i})
+        (directory / '000001' / 'bar.idx').unlink()
+        (directory / '000002').mkdir()
+        with pytest.raises(FileNotFoundError):
+            granular.ShardedDatasetReader(directory, granular.decoders)
+        with granular.ShardedDatasetReader(
+            directory, granular.decoders, partial=True
+        ) as reader:
+            assert len(reader) == 3
+            for i in range(3):
+                assert reader[i] == {'foo': f'value{i}', 'bar': i}
