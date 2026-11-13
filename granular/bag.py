@@ -150,12 +150,17 @@ class BagReader(utils.Closing):
                 idx_source = SharedBuffer(self.bag.read(length * 8))
 
         # Index source
+        if cache_index and ispath(idx_source):
+            with idx_source.open('rb') as f:
+                idx_source = SharedBuffer(f.read())
         if not hasattr(idx_source, 'open'):
             cache_index = False
             idx_source = SharedBuffer(idx_source)
-        self.cache_index = cache_index
         self.idx_source = idx_source
-        self.truncate = truncate
+        self.idx.seek(0, os.SEEK_END)
+        self.length = self.idx.tell() // 8
+        if truncate:
+            self.length = self._complete(self.length)
 
     def _complete(self, length):
         self.bag.seek(0, os.SEEK_END)
@@ -170,18 +175,7 @@ class BagReader(utils.Closing):
 
     @functools.cached_property
     def idx(self):
-        if self.cache_index and ispath(self.idx_source):
-            with self.idx_source.open('rb') as f:
-                self.idx_source = SharedBuffer(f.read())
         return self.idx_source.open('rb', buffering=8192)
-
-    @functools.cached_property
-    def length(self):
-        self.idx.seek(0, os.SEEK_END)
-        length = self.idx.tell() // 8
-        if self.truncate:
-            length = self._complete(length)
-        return length
 
     @property
     def size(self):
@@ -191,10 +185,16 @@ class BagReader(utils.Closing):
         return datasize + self.length * 8
 
     def __getstate__(self):
-        return {k: v for k, v in vars(self).items() if k not in ('bag', 'idx')}
+        return {
+            'bag_source': self.bag_source,
+            'idx_source': self.idx_source,
+            'length': self.length,
+        }
 
     def __setstate__(self, d):
-        self.__dict__.update(d)
+        self.bag_source = d['bag_source']
+        self.idx_source = d['idx_source']
+        self.length = d['length']
         self.closed = False
 
     def __len__(self):
@@ -225,9 +225,8 @@ class BagReader(utils.Closing):
 
     def close(self):
         assert not self.closed
-        for name in ('bag', 'idx'):
-            if name in vars(self):
-                vars(self)[name].close()
+        self.bag.close()
+        self.idx.close()
         if isinstance(self.idx_source, SharedBuffer):
             if not self.idx_source.closed:
                 self.idx_source.close()

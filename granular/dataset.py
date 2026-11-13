@@ -147,8 +147,10 @@ class DatasetReader(utils.Closing):
             )
             for k in self.spec.keys()
         }
-        self.checked = set()
-        self.truncate = truncate
+        lengths = {k: len(v) for k, v in self.readers.items()}
+        msg = f'Inconsistent column lengths: {lengths}'
+        assert truncate or len(set(lengths.values())) == 1, msg
+        self.length = min(lengths.values())
         self.decoders = {k: decoders[v] for k, v in self.spec.items()}
         self.cache_keys = cache_keys
         self.workers = int(parallel and len(set(self.spec) - set(cache_keys)))
@@ -173,12 +175,6 @@ class DatasetReader(utils.Closing):
     def __len__(self):
         return self.length
 
-    @functools.cached_property
-    def length(self):
-        if self.truncate:
-            return min(len(x) for x in self.readers.values())
-        return len(next(iter(self.readers.values())))
-
     def __getitem__(self, index):
         if isinstance(index, tuple):
             index, keys = index
@@ -188,7 +184,6 @@ class DatasetReader(utils.Closing):
         else:
             keys = tuple(self.spec.keys())
         assert all(k in self.spec for k in keys), (self.spec, keys)
-        self._check(keys)
         dec = lambda k, v: self._decode(k, v, self.spec[k])
         if isinstance(index, int):
             point = self._fetch(keys, index)
@@ -230,14 +225,6 @@ class DatasetReader(utils.Closing):
                 f'{pool.workers} workers but expected {self.workers}'
             )
         return pool
-
-    def _check(self, keys):
-        for key in keys:
-            if key not in self.checked and not self.truncate:
-                lengths = {key: len(self.readers[key]), 'dataset': len(self)}
-                msg = f'Inconsistent column lengths: {lengths}'
-                assert lengths[key] == len(self), msg
-                self.checked.add(key)
 
     def _fetch(self, keys, index):
         if self.workers:
