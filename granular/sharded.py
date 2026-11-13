@@ -91,7 +91,7 @@ class ShardedDatasetReader(utils.Closing):
         parallel=False,
         shardstart=0,
         shardstep=1,
-        partial=False,
+        truncate=False,
     ):
         super().__init__()
         if isinstance(directory, str):
@@ -108,7 +108,7 @@ class ShardedDatasetReader(utils.Closing):
             cache_keys,
             parallel,
             pool_name,
-            partial,
+            truncate,
         )
         if parallel:
             make = lambda x: dataset.DatasetReader(x, *args)

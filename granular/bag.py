@@ -107,7 +107,7 @@ class BagReader(utils.Closing):
         cache_index=True,
         cache_data=False,
         single_file=False,  # Old format
-        partial=False,
+        truncate=False,
     ):
         super().__init__()
 
@@ -159,7 +159,7 @@ class BagReader(utils.Closing):
         self.idx_source = idx_source
         self.idx.seek(0, os.SEEK_END)
         self.length = self.idx.tell() // 8
-        if partial:
+        if truncate:
             self.length = self._complete(self.length)
 
     def _complete(self, length):
