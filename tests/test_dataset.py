@@ -243,18 +243,10 @@ class TestDataset:
         assert reader[0:3, ('baz',)]['baz'] == ['word0', 'word1', 'word2']
         reader.close()
         assert sorted(opened) == ['bar.idx', 'baz.bag', 'baz.idx', 'spec.json']
-
-    def test_column_lengths_checked_on_read(self, tmpdir):
-        directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8'}
-        with granular.DatasetWriter(
-            directory, spec, granular.encoders
-        ) as writer:
-            for i in range(3):
-                writer.append({'bar': i, 'baz': f'word{i}'})
-        with granular.BagWriter(directory / 'baz.bag') as writer:
+        monkeypatch.undo()
+        with granular.BagWriter(directory / 'foo.bag') as writer:
             writer.append(granular.encoders['utf8']('extra'))
         reader = granular.DatasetReader(directory, granular.decoders)
-        assert reader[0:3, ('bar',)]['bar'] == [0, 1, 2]
+        assert reader[0:3, ('baz',)]['baz'] == ['word0', 'word1', 'word2']
         with pytest.raises(AssertionError, match='Inconsistent column'):
-            reader[0:3, ('baz',)]
+            reader[0:3, ('foo',)]

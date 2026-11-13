@@ -1,5 +1,4 @@
 import atexit
-import functools
 import os
 import pathlib
 import pickle
@@ -109,6 +108,9 @@ class BagReader(utils.Closing):
         single_file=False,  # Old format
     ):
         super().__init__()
+        self._bag = None
+        self._idx = None
+        self._length = None
 
         # User inputs
         if isinstance(bag_source, str):
@@ -155,21 +157,27 @@ class BagReader(utils.Closing):
         self.cache_index = cache_index
         self.idx_source = idx_source
 
-    @functools.cached_property
+    @property
     def bag(self):
-        return self.bag_source.open('rb', buffering=8192)
+        if self._bag is None:
+            self._bag = self.bag_source.open('rb', buffering=8192)
+        return self._bag
 
-    @functools.cached_property
+    @property
     def idx(self):
-        if self.cache_index and ispath(self.idx_source):
-            with self.idx_source.open('rb') as f:
-                self.idx_source = SharedBuffer(f.read())
-        return self.idx_source.open('rb', buffering=8192)
+        if self._idx is None:
+            if self.cache_index and ispath(self.idx_source):
+                with self.idx_source.open('rb') as f:
+                    self.idx_source = SharedBuffer(f.read())
+            self._idx = self.idx_source.open('rb', buffering=8192)
+        return self._idx
 
-    @functools.cached_property
+    @property
     def length(self):
-        self.idx.seek(0, os.SEEK_END)
-        return self.idx.tell() // 8
+        if self._length is None:
+            self.idx.seek(0, os.SEEK_END)
+            self._length = self.idx.tell() // 8
+        return self._length
 
     @property
     def size(self):
@@ -179,10 +187,20 @@ class BagReader(utils.Closing):
         return datasize + self.length * 8
 
     def __getstate__(self):
-        return {k: v for k, v in vars(self).items() if k not in ('bag', 'idx')}
+        return {
+            'bag_source': self.bag_source,
+            'idx_source': self.idx_source,
+            'cache_index': self.cache_index,
+            'length': self._length,
+        }
 
     def __setstate__(self, d):
-        self.__dict__.update(d)
+        self.bag_source = d['bag_source']
+        self.idx_source = d['idx_source']
+        self.cache_index = d.get('cache_index', False)
+        self._bag = None
+        self._idx = None
+        self._length = d['length']
         self.closed = False
 
     def __len__(self):
@@ -213,9 +231,9 @@ class BagReader(utils.Closing):
 
     def close(self):
         assert not self.closed
-        for name in ('bag', 'idx'):
-            if name in vars(self):
-                vars(self)[name].close()
+        for handle in (self._bag, self._idx):
+            if handle is not None:
+                handle.close()
         if isinstance(self.idx_source, SharedBuffer):
             if not self.idx_source.closed:
                 self.idx_source.close()
