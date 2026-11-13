@@ -110,7 +110,6 @@ class BagReader(utils.Closing):
         super().__init__()
         self._bag = None
         self._idx = None
-        self._length = None
 
         # User inputs
         if isinstance(bag_source, str):
@@ -156,6 +155,9 @@ class BagReader(utils.Closing):
             idx_source = SharedBuffer(idx_source)
         self.cache_index = cache_index
         self.idx_source = idx_source
+        with idx_source.open('rb') as f:
+            f.seek(0, os.SEEK_END)
+            self.length = f.tell() // 8
 
     @property
     def bag(self):
@@ -173,13 +175,6 @@ class BagReader(utils.Closing):
         return self._idx
 
     @property
-    def length(self):
-        if self._length is None:
-            self.idx.seek(0, os.SEEK_END)
-            self._length = self.idx.tell() // 8
-        return self._length
-
-    @property
     def size(self):
         if self.length == 0:
             return 0
@@ -191,7 +186,7 @@ class BagReader(utils.Closing):
             'bag_source': self.bag_source,
             'idx_source': self.idx_source,
             'cache_index': self.cache_index,
-            'length': self._length,
+            'length': self.length,
         }
 
     def __setstate__(self, d):
@@ -200,7 +195,7 @@ class BagReader(utils.Closing):
         self.cache_index = d.get('cache_index', False)
         self._bag = None
         self._idx = None
-        self._length = d['length']
+        self.length = d['length']
         self.closed = False
 
     def __len__(self):

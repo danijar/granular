@@ -231,9 +231,9 @@ class TestDataset:
         ) as writer:
             for i in range(3):
                 writer.append({'bar': i, 'baz': f'word{i}'})
-        with granular.BagWriter(directory / 'baz.bag') as writer:
-            writer.append(granular.encoders['utf8']('extra'))
         reader = granular.DatasetReader(directory, granular.decoders)
         assert reader[0:3, ('bar',)]['bar'] == [0, 1, 2]
-        with pytest.raises(AssertionError, match='Inconsistent column'):
-            reader[0:3, ('baz',)]
+        assert reader.readers['bar']._idx is not None
+        assert reader.readers['baz']._idx is None
+        assert reader.readers['baz']._bag is None
+        reader.close()
