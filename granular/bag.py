@@ -179,14 +179,7 @@ class BagReader(utils.Closing):
         return datasize + self.length * 8
 
     def __getstate__(self):
-        state = {
-            'bag_source': self.bag_source,
-            'idx_source': self.idx_source,
-            'cache_index': self.cache_index,
-        }
-        if 'length' in vars(self):
-            state['length'] = self.length
-        return state
+        return {k: v for k, v in vars(self).items() if k not in ('bag', 'idx')}
 
     def __setstate__(self, d):
         self.__dict__.update(d)
