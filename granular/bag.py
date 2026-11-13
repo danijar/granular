@@ -150,14 +150,15 @@ class BagReader(utils.Closing):
                 idx_source = SharedBuffer(self.bag.read(length * 8))
 
         # Index source
+        if cache_index and ispath(idx_source):
+            with idx_source.open('rb') as f:
+                idx_source = SharedBuffer(f.read())
         if not hasattr(idx_source, 'open'):
             cache_index = False
             idx_source = SharedBuffer(idx_source)
-        self.cache_index = cache_index
         self.idx_source = idx_source
-        with idx_source.open('rb') as f:
-            f.seek(0, os.SEEK_END)
-            self.length = f.tell() // 8
+        self.idx.seek(0, os.SEEK_END)
+        self.length = self.idx.tell() // 8
 
     @property
     def bag(self):
@@ -168,9 +169,6 @@ class BagReader(utils.Closing):
     @property
     def idx(self):
         if self._idx is None:
-            if self.cache_index and ispath(self.idx_source):
-                with self.idx_source.open('rb') as f:
-                    self.idx_source = SharedBuffer(f.read())
             self._idx = self.idx_source.open('rb', buffering=8192)
         return self._idx
 
@@ -185,14 +183,12 @@ class BagReader(utils.Closing):
         return {
             'bag_source': self.bag_source,
             'idx_source': self.idx_source,
-            'cache_index': self.cache_index,
             'length': self.length,
         }
 
     def __setstate__(self, d):
         self.bag_source = d['bag_source']
         self.idx_source = d['idx_source']
-        self.cache_index = d.get('cache_index', False)
         self._bag = None
         self._idx = None
         self.length = d['length']

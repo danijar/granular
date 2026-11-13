@@ -233,7 +233,7 @@ class TestDataset:
                 writer.append({'bar': i, 'baz': f'word{i}'})
         reader = granular.DatasetReader(directory, granular.decoders)
         assert reader[0:3, ('bar',)]['bar'] == [0, 1, 2]
-        assert reader.readers['bar']._idx is not None
-        assert reader.readers['baz']._idx is None
+        assert reader.readers['bar']._bag is not None
         assert reader.readers['baz']._bag is None
         reader.close()
+        assert reader.readers['baz']._bag is None
