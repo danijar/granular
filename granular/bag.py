@@ -122,9 +122,10 @@ class BagReader(utils.Closing):
             idx_source = bag_source.with_suffix('.idx')
 
         # A writer that is still creating its files reads as empty.
-        if partial and ispath(bag_source) and ispath(idx_source):
-            if not (bag_source.exists() and idx_source.exists()):
-                bag_source, idx_source = b'', b''
+        paths = (bag_source, idx_source)
+        created = all(ispath(x) and x.exists() for x in paths)
+        if partial and all(ispath(x) for x in paths) and not created:
+            bag_source, idx_source = b'', b''
 
         # Bag source
         if cache_data and ispath(bag_source):
