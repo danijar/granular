@@ -162,13 +162,6 @@ class BagReader(utils.Closing):
         if truncate:
             self.length = self._complete(self.length)
 
-    def _complete(self, length):
-        self.bag.seek(0, os.SEEK_END)
-        bagsize = self.bag.tell()
-        while length and self._getlim(length - 1, length)[1] > bagsize:
-            length -= 1
-        return length
-
     @functools.cached_property
     def bag(self):
         return self.bag_source.open('rb', buffering=8192)
@@ -233,6 +226,13 @@ class BagReader(utils.Closing):
         if isinstance(self.bag_source, SharedBuffer):
             if not self.bag_source.closed:
                 self.bag_source.close()
+
+    def _complete(self, length):
+        self.bag.seek(0, os.SEEK_END)
+        bagsize = self.bag.tell()
+        while length and self._getlim(length - 1, length)[1] > bagsize:
+            length -= 1
+        return length
 
     def _getlim(self, start, stop):
         assert start < stop, (start, stop)
