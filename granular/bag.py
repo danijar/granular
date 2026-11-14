@@ -1,5 +1,4 @@
 import atexit
-import functools
 import os
 import pathlib
 import pickle
@@ -109,6 +108,8 @@ class BagReader(utils.Closing):
         single_file=False,  # Old format
     ):
         super().__init__()
+        self._bag = None
+        self._idx = None
 
         # User inputs
         if isinstance(bag_source, str):
@@ -159,13 +160,17 @@ class BagReader(utils.Closing):
         self.idx.seek(0, os.SEEK_END)
         self.length = self.idx.tell() // 8
 
-    @functools.cached_property
+    @property
     def bag(self):
-        return self.bag_source.open('rb', buffering=8192)
+        if self._bag is None:
+            self._bag = self.bag_source.open('rb', buffering=8192)
+        return self._bag
 
-    @functools.cached_property
+    @property
     def idx(self):
-        return self.idx_source.open('rb', buffering=8192)
+        if self._idx is None:
+            self._idx = self.idx_source.open('rb', buffering=8192)
+        return self._idx
 
     @property
     def size(self):
@@ -184,6 +189,8 @@ class BagReader(utils.Closing):
     def __setstate__(self, d):
         self.bag_source = d['bag_source']
         self.idx_source = d['idx_source']
+        self._bag = None
+        self._idx = None
         self.length = d['length']
         self.closed = False
 
@@ -215,8 +222,9 @@ class BagReader(utils.Closing):
 
     def close(self):
         assert not self.closed
-        self.bag.close()
-        self.idx.close()
+        for handle in (self._bag, self._idx):
+            if handle:
+                handle.close()
         if isinstance(self.idx_source, SharedBuffer):
             if not self.idx_source.closed:
                 self.idx_source.close()
