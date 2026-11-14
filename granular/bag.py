@@ -160,7 +160,7 @@ class BagReader(utils.Closing):
         self.idx.seek(0, os.SEEK_END)
         self.length = self.idx.tell() // 8
         if truncate:
-            self.length = self._complete(self.length)
+            self.length = self._completed(self.length)
 
     @functools.cached_property
     def bag(self):
@@ -227,7 +227,7 @@ class BagReader(utils.Closing):
             if not self.bag_source.closed:
                 self.bag_source.close()
 
-    def _complete(self, length):
+    def _completed(self, length):
         self.bag.seek(0, os.SEEK_END)
         bagsize = self.bag.tell()
         while length and self._getlim(length - 1, length)[1] > bagsize:
