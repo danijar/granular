@@ -1,5 +1,6 @@
 import pathlib
 import pickle
+import struct
 
 import granular
 import numpy as np
@@ -165,3 +166,13 @@ class TestBag:
             assert len(reader) == 2
             assert reader[0] == b'hello'
             assert reader[1] == b'world'
+
+    def test_truncate(self, tmpdir):
+        filename = pathlib.Path(tmpdir) / 'file.bag'
+        with granular.BagWriter(filename) as writer:
+            for i in range(3):
+                writer.append(f'record{i}'.encode())
+        with (filename.with_suffix('.idx')).open('ab') as f:
+            f.write(struct.pack('<Q', filename.stat().st_size + 100))
+        assert len(granular.BagReader(filename)) == 4
+        assert len(granular.BagReader(filename, truncate=True)) == 3
