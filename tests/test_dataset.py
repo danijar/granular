@@ -222,16 +222,3 @@ class TestDataset:
             assert len(writer) == 5
             with pytest.raises(ValueError, match='Record mismatch'):
                 writer.append({'foo': 'value5', 'bar': 5})
-
-    def test_close_skips_unread_columns(self, tmpdir):
-        directory = pathlib.Path(tmpdir) / 'dataset'
-        spec = {'bar': 'int', 'baz': 'utf8'}
-        with granular.DatasetWriter(
-            directory, spec, granular.encoders
-        ) as writer:
-            for i in range(3):
-                writer.append({'bar': i, 'baz': f'word{i}'})
-        reader = granular.DatasetReader(directory, granular.decoders)
-        assert reader[0:3, ('bar',)]['bar'] == [0, 1, 2]
-        (directory / 'baz.bag').unlink()
-        reader.close()

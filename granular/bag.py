@@ -223,7 +223,7 @@ class BagReader(utils.Closing):
     def close(self):
         assert not self.closed
         for handle in (self._bag, self._idx):
-            if handle is not None:
+            if handle:
                 handle.close()
         if isinstance(self.idx_source, SharedBuffer):
             if not self.idx_source.closed:
