@@ -167,7 +167,7 @@ class TestBag:
             assert reader[0] == b'hello'
             assert reader[1] == b'world'
 
-    def test_truncate_drops_records_missing_from_bag(self, tmpdir):
+    def test_truncate(self, tmpdir):
         filename = pathlib.Path(tmpdir) / 'file.bag'
         with granular.BagWriter(filename) as writer:
             for i in range(3):
